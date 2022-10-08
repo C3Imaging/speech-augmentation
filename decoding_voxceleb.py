@@ -75,8 +75,15 @@ def run_inference():
     for decoder in args.decoders:
         decoders_dict[decoder] = eval("decoding_utils." + decoder)()
 
+    # log the decoders used for this run
+    logging.info(f"This run is set up to use the following decoders:")
+    for decoder in decoders_dict.keys():
+        logging.info(decoder)
+
+    # get the number of first level subfolders in voxceleb, for progress bar
+    num_folders =  len(next(os.walk(args.folder, topdown=True))[1])
     # loop through voxceleb dataset
-    for dirpath, _, filenames in tqdm(os.walk(args.folder, topdown=False), desc="Transcribing dataset"):
+    for dirpath, _, filenames in tqdm(os.walk(args.folder, topdown=False), total=num_folders, unit=" folders", desc="Transcribing dataset, so far"):
         logging.info(f"Starting processing folder: {dirpath}")
         # split all files in directory into a list of speech files and a list of txt files (if they exist - transcript files will be contained)
         speech_files, txt_files = get_speech_data_lists(dirpath, filenames)
@@ -140,7 +147,7 @@ if __name__ == "__main__":
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)  # track INFO logging events (default was WARNING)
     root_logger.handlers = [] # clear handlers
-    root_logger.addHandler(logging.FileHandler(os.path.join(args.folder, 'wav2vec2_alignments_run.log'), 'w+')) # handler to log to file
+    root_logger.addHandler(logging.FileHandler(os.path.join(args.folder, 'wav2vec2_alignments_runTEST.log'), 'w+')) # handler to log to file
     root_logger.handlers[0].setFormatter(logging.Formatter('%(levelname)s:%(asctime)s: %(message)s')) # log level and message
 
     #setup CUDA config
