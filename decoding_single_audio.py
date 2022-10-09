@@ -52,7 +52,7 @@ if __name__ == "__main__":
         #emissions = torch.log_softmax(emissions, dim=-1)
 
     # greedy decoding
-    greedy_result = greedy_decoder(emissions[0]) # decoded phrase as a list of words
+    greedy_result = greedy_decoder(emissions) # decoded phrase as a list of words
     greedy_wer = torchaudio.functional.edit_distance(transcript, greedy_result) / len(transcript)
 
     # beam search decoding

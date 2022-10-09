@@ -11,39 +11,6 @@ from Tools import utils
 from Tools import decoding_utils
 
 
-def get_speech_data_lists(dirpath, filenames):
-    """Gets the speech audio files paths and the txt files (if they exist) from a single folder.
-
-    Args:
-      dirpath (str):
-        The path to the directory containing the audio files and some txt files, which the transcript files will be part of (if they exist).
-      filenames (list of str elements):
-        the list of all files found by os.walk in this directory.
-
-    Returns:
-      speech_files (str, list):
-        A sorted list of speech file paths found in this directory.
-      txt_files (str, list):
-        A list of txt files.
-    """
-    speech_files = []
-    txt_files = []
-    # loop through all files found
-    # split filenames in a directory into speech files and transcript files
-    for filename in filenames:
-        if filename.endswith('.wav'):
-            speech_files.append(os.path.join(dirpath, filename))
-        elif filename.endswith('.txt'):
-            txt_files.append(os.path.join(dirpath, filename))
-    # avoid sorting empty lists
-    if len(speech_files):
-        speech_files.sort()
-    if len(txt_files):
-        txt_files.sort()
-
-    return speech_files, txt_files
-
-
 def infer_and_decode(speechfile, decoder):
     """Runs wav2vec2 inference on a speech file and performs decoding of wav2vec2 output (emissions matrix) by the decoder specified, returning the transcript.
     
@@ -81,12 +48,12 @@ def run_inference():
         logging.info(decoder)
 
     # get the number of first level subfolders in voxceleb, for progress bar
-    num_folders =  len(next(os.walk(args.folder, topdown=True))[1])
+    num_folders = len(next(os.walk(args.folder, topdown=True))[1])
     # loop through voxceleb dataset
     for dirpath, _, filenames in tqdm(os.walk(args.folder, topdown=False), total=num_folders, unit=" folders", desc="Transcribing dataset, so far"):
         logging.info(f"Starting processing folder: {dirpath}")
         # split all files in directory into a list of speech files and a list of txt files (if they exist - transcript files will be contained)
-        speech_files, txt_files = get_speech_data_lists(dirpath, filenames)
+        speech_files, txt_files = decoding_utils.get_speech_data_lists(dirpath, filenames)
         # get only the transcript files created by decoders
         # create dictionary per decoder where value is a list of unique IDs (voxceleb format) corresponding to speech files for which there already exists a decoded transcript by that decoder in this folder
         decoded_transcript_files_IDs_dict = {}
@@ -130,14 +97,12 @@ def main():
 
 
 if __name__ == "__main__":
-    # currently implemented decoders
-    known_decoders = ['GreedyCTCDecoder', 'BeamSearchDecoder']
     # set up command line arguments
     parser = argparse.ArgumentParser(
         description="Run ASR inference on entire VoxCeleb dataset and save transcripts.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
                         help="Path to VoxCeleb dataset root folder.")
-    parser.add_argument("--decoders", nargs="*", type=str, choices=known_decoders, default=known_decoders,
+    parser.add_argument("--decoders", nargs="*", type=str, choices=decoding_utils.known_decoders, default=decoding_utils.known_decoders,
                         help="Optional named argument specifying a list of decoder classes to use. By default all implemented decoders are used.")
     # parse command line arguments
     global args
@@ -147,7 +112,7 @@ if __name__ == "__main__":
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)  # track INFO logging events (default was WARNING)
     root_logger.handlers = [] # clear handlers
-    root_logger.addHandler(logging.FileHandler(os.path.join(args.folder, 'wav2vec2_alignments_runTEST.log'), 'w+')) # handler to log to file
+    root_logger.addHandler(logging.FileHandler(os.path.join(args.folder, 'wav2vec2_alignments_run.log'), 'w+')) # handler to log to file
     root_logger.handlers[0].setFormatter(logging.Formatter('%(levelname)s:%(asctime)s: %(message)s')) # log level and message
 
     #setup CUDA config
