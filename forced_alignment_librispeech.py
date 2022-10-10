@@ -240,11 +240,14 @@ if __name__ == "__main__":
     # parse command line arguments
     global args
     args = parser.parse_args()
+    
     # setup folder structure variables
     global out_dir
     out_dir = "wav2vec2_alignments" # the output folder to be created in folders where there are audio files and a transcript file
+
     # setup logging to both console and logfile
-    utils.setup_logging_console_folder(args.folder)
+    utils.setup_logging(args.folder, 'wav2vec2_forced_alignment_librispeech.log', console=True)
+
     # setup directory traversal mode variables
     mode = args.mode
     global asleaf

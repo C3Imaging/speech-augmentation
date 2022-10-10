@@ -109,11 +109,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # setup logging to logfile only
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)  # track INFO logging events (default was WARNING)
-    root_logger.handlers = [] # clear handlers
-    root_logger.addHandler(logging.FileHandler(os.path.join(args.folder, 'wav2vec2_alignments_run.log'), 'w+')) # handler to log to file
-    root_logger.handlers[0].setFormatter(logging.Formatter('%(levelname)s:%(asctime)s: %(message)s')) # log level and message
+    utils.setup_logging(args.folder, 'wav2vec2_decoding_voxceleb.log')
 
     #setup CUDA config
     torch.random.manual_seed(0)
