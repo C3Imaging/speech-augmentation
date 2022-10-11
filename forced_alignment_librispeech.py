@@ -3,6 +3,7 @@
 # based on the tutorial: https://pytorch.org/audio/stable/tutorials/forced_alignment_tutorial.html
 
 import os
+import sys
 import time
 import torch
 import logging
@@ -262,9 +263,9 @@ if __name__ == "__main__":
     # start timing how long it takes to run script
     tic = time.perf_counter()
 
-    logging.info("Started script.")
+    # log the command that started the script
+    logging.info(f"Started script via: {' '.join(sys.argv)}")
     main()
-    logging.info("Ended script.")
 
     toc = time.perf_counter()
     logging.info(f"Finished processing in {time.strftime('%H:%M:%Ss', time.gmtime(toc - tic))}")

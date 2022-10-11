@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import time
 import torch
 import logging
@@ -87,11 +88,11 @@ def run_inference():
 def main():
     "Setup and use wav2vec2 model for creating transcripts using different decoding approaches."
     # setup inference model variables
-    global bundle, model, labels, dictionary
+    global bundle, model #, labels, dictionary
     bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H # wav2vec2 model trained for ASR, sample rate = 16kHz
     model = bundle.get_model().to(device) # wav2vec2 model on GPU
-    labels = bundle.get_labels() # vocab of chars known to wav2vec2
-    dictionary = {c: i for i, c in enumerate(labels)}
+    # labels = bundle.get_labels() # vocab of chars known to wav2vec2
+    # dictionary = {c: i for i, c in enumerate(labels)}
 
     run_inference()
 
@@ -119,9 +120,9 @@ if __name__ == "__main__":
     # start timing how long it takes to run script
     tic = time.perf_counter()
 
-    logging.info("Started script.")
+    # log the command that started the script
+    logging.info(f"Started script via: {' '.join(sys.argv)}")
     main()
-    logging.info("Ended script.")
 
     toc = time.perf_counter()
     logging.info(f"Finished processing in {time.strftime('%H:%M:%Ss', time.gmtime(toc - tic))}")
