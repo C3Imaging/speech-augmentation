@@ -9,7 +9,7 @@ import torchaudio
 from tqdm import tqdm
 import torchaudio.models.decoder
 from Tools import utils
-from Tools import decoding_utils
+from Tools import decoding_utils_torch
 
 
 def infer_and_decode(speechfile, decoder):
@@ -33,7 +33,7 @@ def infer_and_decode(speechfile, decoder):
         # run ASR inference
         emissions, _ = model(waveform.to(device))
 
-        return ' '.join(decoder.forward(emissions)).lower()
+        return ' '.join(decoder(emissions, labels=labels)).lower() # forward of a torch.nn.Module object called
 
 
 def run_inference():
@@ -54,7 +54,7 @@ def run_inference():
     for dirpath, _, filenames in tqdm(os.walk(args.folder, topdown=False), total=num_folders, unit=" folders", desc="Transcribing dataset, so far"):
         logging.info(f"Starting processing folder: {dirpath}")
         # split all files in directory into a list of speech files and a list of txt files (if they exist - transcript files will be contained)
-        speech_files, txt_files = decoding_utils.get_speech_data_lists(dirpath, filenames)
+        speech_files, txt_files = decoding_utils_torch.get_speech_data_lists(dirpath, filenames)
         # get only the transcript files created by decoders
         # create dictionary per decoder where value is a list of unique IDs (voxceleb format) corresponding to speech files for which there already exists a decoded transcript by that decoder in this folder
         decoded_transcript_files_IDs_dict = {}
@@ -88,10 +88,10 @@ def run_inference():
 def main():
     "Setup and use wav2vec2 model for creating transcripts using different decoding approaches."
     # setup inference model variables
-    global bundle, model #, labels, dictionary
+    global bundle, model, labels#, dictionary
     bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H # wav2vec2 model trained for ASR, sample rate = 16kHz
     model = bundle.get_model().to(device) # wav2vec2 model on GPU
-    # labels = bundle.get_labels() # vocab of chars known to wav2vec2
+    labels = bundle.get_labels() # vocab of chars known to wav2vec2
     # dictionary = {c: i for i, c in enumerate(labels)}
 
     run_inference()
@@ -100,10 +100,10 @@ def main():
 if __name__ == "__main__":
     # set up command line arguments
     parser = argparse.ArgumentParser(
-        description="Run ASR inference on entire VoxCeleb dataset and save transcripts.")
+        description="Run ASR inference on entire VoxCeleb dataset and save transcripts. NOTE: this script can only use wav2vec2 ASR models from torchaudio library.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
                         help="Path to VoxCeleb dataset root folder.")
-    parser.add_argument("--decoders", nargs="*", type=str, choices=decoding_utils.known_decoders, default=decoding_utils.known_decoders,
+    parser.add_argument("--decoders", nargs="*", type=str, choices=decoding_utils_torch.known_decoders, default=decoding_utils_torch.known_decoders,
                         help="Optional named argument specifying a list of decoder classes to use. By default all implemented decoders are used.")
     # parse command line arguments
     global args

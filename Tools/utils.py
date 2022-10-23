@@ -1,5 +1,6 @@
 import os
 import sys
+import csv
 import logging
 
 
@@ -33,3 +34,14 @@ def BinarySearch(L, x) -> bool:
                  first = midpoint+1
 
     return found
+
+
+def dict_to_csv(path, d):
+    fnames = [str(key) for key in d.keys()]
+    try:
+        with open(path, 'w') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fnames)
+            writer.writeheader()
+            writer.writerow(d)
+    except IOError:
+        print("I/O error")

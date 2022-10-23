@@ -229,7 +229,7 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run demo inference of wav2vec2 forced alignment on Librispeech dataset folder format.")
+        description="Run ASR inference using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech dataset. NOTE: this script can only use wav2vec2 ASR models from torchaudio library.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
                         help="Path to a folder in Librispeech, can be a root folder containing other folders or a leaf folder containing audio and transcript files. Defaults to CWD if not provided.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",

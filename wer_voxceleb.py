@@ -6,7 +6,7 @@ import argparse
 import torchaudio
 from tqdm import tqdm
 from Tools import utils
-from Tools import decoding_utils
+from Tools import decoding_utils_torch
 
 
 # running average WER for a decoder
@@ -50,7 +50,7 @@ def main():
         logging.info(f"Starting processing folder: {dirpath}")
         # split all files in directory into a list of speech files and a list of txt files (if they exist,
         # -> transcript files will be contained -> including a ground truth transcript file if it exists)
-        _, txt_files = decoding_utils.get_speech_data_lists(dirpath, filenames)
+        _, txt_files = decoding_utils_torch.get_speech_data_lists(dirpath, filenames)
         # initialise dictionary of transcripts paths
         transcripts_paths = {'ground_truths': []}
         for decoder in decoders_dict.keys():
@@ -94,10 +94,10 @@ def main():
 if __name__ == "__main__":
     # set up command line arguments
     parser = argparse.ArgumentParser(
-        description="Calculate average WER of decoder(s) [specified by --decoders] on the VoxCeleb dataset.")
+        description="Calculate average WER of decoder(s) [specified by --decoders] on the VoxCeleb dataset. Run this script on VoxCeleb folder AFTER generating transcripts with a particular ASR model+decoder.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
                         help="Path to VoxCeleb dataset root folder.")
-    parser.add_argument("--decoders", nargs="*", type=str, choices=decoding_utils.known_decoders, default=decoding_utils.known_decoders,
+    parser.add_argument("--decoders", nargs="*", type=str, choices=decoding_utils_torch.known_decoders, default=decoding_utils_torch.known_decoders,
                         help="Optional named argument specifying a list of decoder classes to use. By default all implemented decoders are used.")
     # parse command line arguments
     global args

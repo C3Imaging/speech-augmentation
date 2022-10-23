@@ -1,8 +1,11 @@
+# run ASR inference using a wav2vec2 ASR model and a specified decoder on a single audio file.
+# NOTE: this script can only use wav2vec2 ASR models from torchaudio library.
+
 import os
 import torch
 import torchaudio
 import torchaudio.models.decoder
-from Tools import decoding_utils
+from Tools import decoding_utils_torch
 
 if __name__ == "__main__":
     # folder for saving output wavefiles (and manually plots if needed)
@@ -22,7 +25,7 @@ if __name__ == "__main__":
     files = torchaudio.models.decoder.download_pretrained_files("librispeech-4-gram")
 
     # initialise greedy CTC decoder with no language model
-    greedy_decoder = decoding_utils.GreedyCTCDecoder(labels)
+    greedy_decoder = decoding_utils_torch.GreedyCTCDecoder(labels)
 
     # initialise beam search decoder with language model
     beam_search_decoder = torchaudio.models.decoder.ctc_decoder(
