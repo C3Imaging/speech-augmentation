@@ -13,15 +13,13 @@ def get_config_dict(args):
     if isinstance(args, Namespace):
         # unpack Namespace into base dict obj
         args = vars(args)
-    fields_dict = {}
     fields = Wav2Vec2CtcConfig.__dataclass_fields__
-    # create dict for attributes of Wav2Vec2CtcConfig with vals taken from the same key in args
+    # create dict for attributes of Wav2Vec2CtcConfig with vals taken from the same key in args, if they exist
+    fields_dict = {}
+    # this means Wav2Vec2CtcConfig obj fields will be overwritten with vals from args, otherwise they will be default
     for field in fields.keys():
         if field in args:
             fields_dict[field] = args[field]
-
-    # fields_dict['w2v_path'] = model_path
-    assert len(fields_dict) == len(fields)
 
     return fields_dict
 

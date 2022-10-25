@@ -12,10 +12,11 @@ from Tools.decoding_utils_chkpt import get_feature
 from Tools.decoding_utils_chkpt import get_config_dict
 
 
-
 if __name__ == "__main__":
     model_path = "/workspace/projects/Alignment/wav2vec2_alignment/Models/w2v_fairseq/wav2vec2_vox_960h_new.pt"
-    target_dict = Dictionary.load('/workspace/projects/Alignment/wav2vec2_alignment/Models/vox_55h/dict.ltr.txt')
+    target_dict = Dictionary.load('/workspace/projects/Alignment/wav2vec2_alignment/Models/w2v_fairseq/dict.ltr.txt')
+    # target_dict = Dictionary.load('/workspace/projects/Alignment/wav2vec2_alignment/Models/vox_55h/dict.ltr.txt')
+
 
     w2v = torch.load(model_path)
 
@@ -57,5 +58,3 @@ if __name__ == "__main__":
 
     res = post_process(hyp_pieces, 'letter')
     print(res)
-    a  = 1
-

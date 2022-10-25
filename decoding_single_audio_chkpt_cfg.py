@@ -61,5 +61,3 @@ if __name__ == "__main__":
 
     res = post_process(hyp_pieces, 'letter')
     print(res)
-    a  = 1
-
