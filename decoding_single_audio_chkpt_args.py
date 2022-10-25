@@ -1,6 +1,6 @@
 # run ASR inference using a wav2vec2 ASR model and a specified decoder on a single audio file.
 # NOTE: this script can only use wav2vec2 ASR models from .pt checkpoint files.
-# used for wav2vec2 ASR checkpoints that, when loaded, have a 'cfg' key but no 'args' key.
+# used for wav2vec2 ASR checkpoints that, when loaded, have an 'args' key but no 'cfg' key.
 
 import torch
 from argparse import Namespace
