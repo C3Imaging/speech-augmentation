@@ -3,8 +3,7 @@ Tools/__pycache__/
 Models/
 single_audio_outputs/
 speaker_encoder_outputs/
+cleese_outputs/
 test*.py
-cleeseConfig_all_lj.py
-first_incleese_test.py
 
 
