@@ -3,168 +3,221 @@
 Selecting adult speaker candidates for Adult-to-Child voice conversion. Using the demo01 file from Resemblyzer github repository 
 for the computation of cosine similarities between speaker embeddings:
 https://github.com/resemble-ai/Resemblyzer/blob/master/demo01_similarity.py
+
+DEMO 01: shows how to compare speech segments (=utterances) between them to get a metric  
+on how similar their voices sound. We expect utterances from the same speaker to have a high 
+similarity, and those from distinct speakers to have a lower one.
 """
 
-from resemblyzer import preprocess_wav, VoiceEncoder
-from distutils.dir_util import copy_tree
-from itertools import groupby
-from pathlib import Path
-from tqdm import tqdm
-import numpy as np
+import os
+import sys
+import time
+import logging
+import argparse
 import warnings
 import operator
-import os
+import numpy as np
+from tqdm import tqdm
+from Tools import utils
+from pathlib import Path
+from itertools import groupby
+from distutils.dir_util import copy_tree
+from resemblyzer import preprocess_wav, VoiceEncoder
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-# DEMO 01: shows how to compare speech segments (=utterances) between them to get a metric  
-# on how similar their voices sound. We expect utterances from the same speaker to have a high 
-# similarity, and those from distinct speakers to have a lower one. 
 
-# the speaker encoder network from the d-vectors paper
-encoder = VoiceEncoder()
+def get_adults_wavpaths(path):
+     # get a list of all audio files in all subdirs of folder specified by path
+    adults_wav_fpaths = list(Path(path).glob("**/*.flac"))
+    if not adults_wav_fpaths:
+        adults_wav_fpaths = list(Path(path).glob("**/*.wav"))
+    assert len(adults_wav_fpaths) != 0, "Adults speech files list is empty. Check the extension used in search."
 
-# set the cosine similarity threshold for adult speakers
-similarity_threshold = 0.75
-
-# define the root output folder that will contain subfolders of adult speakers in Librispeech format
-# the adult speakers selected will be the ones with the highest similarity to child speakers.
-# we will build this folder using this script.
-OUTPUTDIR = f"/workspace/projects/Alignment/wav2vec2_alignment/speaker_encoder_outputs/Librispeech-similarity-above-{similarity_threshold}"
-if not os.path.exists(OUTPUTDIR): os.makedirs(OUTPUTDIR, exist_ok=True)
-
-# Librispeech format
-# ADULTS_CORPUS = "/workspace/datasets/LibriTTS-train-clean-360/LibriTTS/train-clean-360" # LibriTTS path
-ADULTS_CORPUS = "/workspace/datasets/LibriSpeech-train-clean-360/LibriSpeech/train-clean-360" # Librispeech path
-# CMU Kids format
-KIDS_CORPUS = "/workspace/datasets/cmu_kids_test"
-# specify if grouping all child speakers into one 'CMU speaker'
-avg_child = True
-
-# get a list of all audio files in all subdirs of root KIDS_CORPUS folder
-kids_wav_fpaths = list(Path(KIDS_CORPUS).glob("**/*.wav"))
-assert len(kids_wav_fpaths) != 0, "Kids speech files list is empty. Check the extension used in search."
-kids_wav_fpaths.sort()
-
-# get a list of all audio files in all subdirs of root ADULTS_CORPUS folder
-adults_wav_fpaths = list(Path(ADULTS_CORPUS).glob("**/*.flac"))
-assert len(adults_wav_fpaths) != 0, "Adults speech files list is empty. Check the extension used in search."
-
-#open text file containing Librispeech Speaker IDs and genders
-speakers_info = open(os.path.join(Path(ADULTS_CORPUS).parent, "SPEAKERS.TXT"), 'r')
+    return adults_wav_fpaths
 
 
-# Group the wavs per speaker and load them into arrays using the preprocessing function provided with 
-# Resemblyzer to load wavs into memory. This normalizes the volume, trims long silences and resamples 
-# the wav to the correct sampling rate. The grouped, preprocessed audio files will be ready to input to encoder
-if avg_child:
-    # Grouping kids audio samples by each speaker folder's commonly named 'signal' recording session subfolder
-    #  effectively combining all child speakers into one folder -> will produce one embedding representing the average CMU child.
-    kids_speaker_wavs = {speaker: list(map(preprocess_wav, wav_fpaths)) for speaker, wav_fpaths in
-                    groupby(tqdm(kids_wav_fpaths, "Preprocessing kids wavs", len(kids_wav_fpaths), unit="wavs"), 
-                            lambda wav_fpath: wav_fpath.parent.stem)}
-else:
-    # grouping kids audio samples by speaker ID -> will produce an average embedding for each child speaker
-    kids_speaker_wavs = {speaker: list(map(preprocess_wav, wav_fpaths)) for speaker, wav_fpaths in
-                    groupby(tqdm(kids_wav_fpaths, "Preprocessing kids wavs", len(kids_wav_fpaths), unit="wavs"), 
+def get_kids_wavpaths(path):
+    # get a sorted list of all audio files in all subdirs of folder specified by path
+    kids_wav_fpaths = list(Path(args.kids_dir).glob("**/*.wav"))
+    assert len(kids_wav_fpaths) != 0, "Kids speech files list is empty. Check the extension used in search."
+    kids_wav_fpaths.sort()
+
+    return kids_wav_fpaths
+
+
+def get_genders_dict(path):
+    #open text file containing Librispeech Speaker IDs and genders
+    try:
+        speakers_info = open(os.path.join(Path(args.adults_dir).parent, "SPEAKERS.TXT"), 'r')
+    except FileNotFoundError:
+        speakers_info = open(os.path.join(Path(args.adults_dir).parent, "SPEAKERS.txt"), 'r')
+    # read info about all speakers from the entire Librispeech collection
+    ids = []
+    genders = []
+    for line in speakers_info.readlines():
+        if ";" in line:
+            pass
+        else:
+            l = line.split("|")
+            ids.append(l[0].strip())
+            genders.append(l[1].strip())
+
+    # create dict of speaker IDs and their gender
+    # key=id, value=gender
+    ids_and_genders_dict = dict(zip(ids, genders))
+
+    return ids_and_genders_dict
+
+
+def get_grouped_wavs(adults_wav_fpaths, kids_wav_fpaths, avg_child=True):
+    # Group the wavs per speaker and load them into arrays using the preprocessing function provided with 
+    #  Resemblyzer to load wavs into memory. This normalizes the volume, trims long silences and resamples 
+    #  the wavs to the correct sampling rate. 
+    # The grouped, preprocessed audio files will be ready to input to encoder.
+
+    if avg_child:
+        # Grouping kids audio samples by each speaker folder's commonly named 'signal' recording session subfolder
+        #  effectively combining all child speakers into one folder -> will produce one embedding representing the average CMU child.
+        kids_speaker_wavs = {speaker: list(map(preprocess_wav, wav_fpaths)) for speaker, wav_fpaths in
+                        groupby(tqdm(kids_wav_fpaths, "Preprocessing kids wavs", len(kids_wav_fpaths), unit="wavs"), 
+                                lambda wav_fpath: wav_fpath.parent.stem)}
+    else:
+        # grouping kids audio samples by speaker ID -> will produce an average embedding for each child speaker
+        kids_speaker_wavs = {speaker: list(map(preprocess_wav, wav_fpaths)) for speaker, wav_fpaths in
+                        groupby(tqdm(kids_wav_fpaths, "Preprocessing kids wavs", len(kids_wav_fpaths), unit="wavs"), 
+                                lambda wav_fpath: wav_fpath.parent.parent.stem)}
+
+    # grouping adults audio samples by speaker ID -> will produce an average embedding for each adult speaker
+    adults_speaker_wavs = {speaker: list(map(preprocess_wav, wav_fpaths)) for speaker, wav_fpaths in
+                    groupby(tqdm(adults_wav_fpaths, "Preprocessing adults wavs", len(adults_wav_fpaths), unit="wavs"), 
                             lambda wav_fpath: wav_fpath.parent.parent.stem)}
 
-# grouping adults audio samples by speaker ID -> will produce an average embedding for each adult speaker
-adults_speaker_wavs = {speaker: list(map(preprocess_wav, wav_fpaths)) for speaker, wav_fpaths in
-                groupby(tqdm(adults_wav_fpaths, "Preprocessing adults wavs", len(adults_wav_fpaths), unit="wavs"), 
-                        lambda wav_fpath: wav_fpath.parent.parent.stem)}
+    return adults_speaker_wavs, kids_speaker_wavs
 
-# for each speaker, create an averaged speaker embedding vector of len 256
-#  by averaging all the individual embeddings generated by speaker encoder for each audio sample of that speaker.
-# applies L2 norm to averages after.
-# each embeddings matrix is of shape (num_speakers, embed_size).
-# one matrix for the kids speakers and one for the adults.
-embeds_a = np.array([encoder.embed_speaker(wavs[:len(wavs)]) \
-                         for wavs in kids_speaker_wavs.values()])
-embeds_b = np.array([encoder.embed_speaker(wavs[:len(wavs)]) \
-                         for wavs in adults_speaker_wavs.values()])
 
-# read info about all speakers from the entire Librispeech collection
-ids = []
-genders = []
-for line in speakers_info.readlines():
-    if ";" in line:
-        pass
-    else:
-        l = line.split("|")
-        ids.append(l[0].strip())
-        genders.append(l[1].strip())
+def get_embeds(adults_speaker_wavs, kids_speaker_wavs):
+    # initialise the speaker encoder network from the original d-vectors paper https://arxiv.org/abs/1710.10467
+    encoder = VoiceEncoder()
 
-# create dict of speaker IDs and their gender
-# key=id, value=gender
-ids_and_genders_dict = dict(zip(ids, genders))
+    # for each speaker, create an averaged speaker embedding vector of len 256
+    #  by averaging all the individual embeddings generated by speaker encoder for each audio sample of that speaker.
+    # applies L2 norm to averages after.
+    # each embeddings matrix is of shape (num_speakers, embed_size).
+    # one matrix for the kids speakers and one for the adults.
+    embeds_adults = np.array([encoder.embed_speaker(wavs[:len(wavs)]) \
+                            for wavs in adults_speaker_wavs.values()])
+    embeds_kids = np.array([encoder.embed_speaker(wavs[:len(wavs)]) \
+                            for wavs in kids_speaker_wavs.values()])
 
-# dict of 'speaker ID: similarity score' pairs for adult speakers that pass the similarity score threshold
-adults_high_similarity = {}
+    return embeds_adults, embeds_kids
 
-# Compute the similarity matrix. The similarity of two embeddings is simply their dot 
-# product, because the similarity metric is the cosine similarity and the embeddings are 
-# already L2-normed.
 
-# Short version:
- #utt_sim_matrix = np.inner(embeds_a, embeds_b)
+def compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, embeds_kids):
+    # Initialise a dict of 'speaker ID: similarity score' pairs for adult speakers that pass the similarity score threshold,
+    #  used for creating speaker_similarities.txt
+    adults_high_similarity = {}
 
-# Long, detailed version:
-# utt_sim_matrix2[i,j] will store similarity between adult speaker i and child speaker j
-utt_sim_matrix2 = np.zeros((len(embeds_b), len(embeds_a)))
-# # loop through each child average embedding
-# for i in range(len(embeds_a)):
-#     child_speaker_id = list(kids_speaker_wavs.keys())[i]
-#     print(f"---- current child speaker ID: {child_speaker_id} ----")
-#     # loop through each adult average embedding
-#     for j in range(len(embeds_b)):
-#         adult_speaker_id = list(adults_speaker_wavs.keys())[j]
-#         # The @ notation is exactly equivalent to np.dot(embeds_a[i], embeds_b[i])
-#         utt_sim_matrix2[i, j] = embeds_a[i] @ embeds_b[j]
-#         print(f"Similarity score with adult speaker ID {adult_speaker_id} ----> {str(utt_sim_matrix2[i,j])}")
-#         #f.write(str(list(adults_speaker_wavs.keys())[j]) + "---->" + str(utt_sim_matrix2[i,j])+'\n')
-#         # if similarity between child speaker and adult speaker is high
-#         if (utt_sim_matrix2[i,j] > similarity_threshold):
-#             print("High similarity!")
-#             # get path to adult speaker folder
-#             adult_path = os.path.join(ADULTS_CORPUS, adult_speaker_id)
-#             # copy the source adult speaker folder (which contains recording sessions subfolders) to OUTPUTDIR
-#             copy_tree(adult_path, OUTPUTDIR)
+    # Compute the similarity matrix. The similarity of two embeddings is simply their dot 
+    # product, because the similarity metric is the cosine similarity and the embeddings are 
+    # already L2-normed.
 
-# loop through each adult average embedding
-for i in range(len(embeds_b)):
-    adult_speaker_id = list(adults_speaker_wavs.keys())[i]
-    print(f"---- current adult speaker ID: {adult_speaker_id} ----")
-    # loop through each child average embedding
-    for j in range(len(embeds_a)):
-        child_speaker_id = list(kids_speaker_wavs.keys())[j]
-        # The @ notation is exactly equivalent to np.dot(embeds_a[i], embeds_b[i])
-        utt_sim_matrix2[i,j] = embeds_a[j] @ embeds_b[i]
-        print(f"Similarity score with child speaker ID '{child_speaker_id}' ----> {str(utt_sim_matrix2[i,j])}")
-        # if similarity between child speaker and adult speaker is high
-        if (utt_sim_matrix2[i,j] > similarity_threshold):
-            print(f"High similarity! (>{similarity_threshold})")
-            adults_high_similarity[adult_speaker_id] = utt_sim_matrix2[i,j]
-            # get path to adult speaker folder
-            adult_path = os.path.join(ADULTS_CORPUS, adult_speaker_id)
-            # copy everything inside the adult speaker folder (which contains recording sessions subfolders) into OUTPUTDIR/adult_speaker_id
-            copy_tree(adult_path, os.path.join(OUTPUTDIR, adult_speaker_id))
+    # Short version:
+    #utt_sim_matrix = np.inner(embeds_a, embeds_b)
 
-speaker_folders = next(os.walk(OUTPUTDIR))[1] # get the speaker folders names we copied
+    # Long, detailed version:
+    # utt_sim_matrix2[i,j] will store similarity between adult speaker i and child speaker j
+    utt_sim_matrix = np.zeros((len(embeds_adults), len(embeds_kids)))
+    # loop through each adult average embedding
+    for i in range(len(embeds_adults)):
+        adult_speaker_id = list(adults_speaker_wavs.keys())[i]
+        logging.info(f"---- current adult speaker ID: {adult_speaker_id} ----")
+        # loop through each child average embedding
+        for j in range(len(embeds_kids)):
+            child_speaker_id = list(kids_speaker_wavs.keys())[j]
+            # The @ notation is exactly equivalent to np.dot(embeds_a[i], embeds_b[i])
+            utt_sim_matrix[i,j] = embeds_kids[j] @ embeds_adults[i]
+            logging.info(f"Similarity score with child speaker ID: '{'avg_CMU_child' if child_speaker_id == 'signal' else child_speaker_id}' ----> {str(utt_sim_matrix[i,j])}")
+            # if similarity between the adult speaker and child speaker is considered high
+            if (utt_sim_matrix[i,j] > float(args.sim_thresh)):
+                logging.info(f"High similarity! (>{args.sim_thresh})")
+                adults_high_similarity[adult_speaker_id] = utt_sim_matrix[i,j]
+                # get path to adult speaker folder
+                adult_path = os.path.join(args.adults_dir, adult_speaker_id)
+                # copy everything inside the adult speaker folder (which contains recording sessions subfolders) into OUTPUTDIR/adult_speaker_id
+                copy_tree(adult_path, os.path.join(args.out_dir, adult_speaker_id))
+                logging.info(f"{os.path.join(args.out_dir, adult_speaker_id)} folder created by copying {adult_path}. Will be suffixed with gender later.")
 
-# sort similarities in descending order, using sorted() for backwards compatibility or <Py3.7 versions, returns a sorted list of tuples.
-adults_high_similarity_sorted = sorted(adults_high_similarity.items(), key=operator.itemgetter(1), reverse=True)
+    return utt_sim_matrix, adults_high_similarity
 
-with open(os.path.join(OUTPUTDIR, 'speaker_similarities.txt'), "w") as f:
-    if avg_child:
-        f.write("Using one child speaker: the average CMU child.\n")
-    f.write(f"Similarity scores of adult speakers from {ADULTS_CORPUS} that are above {similarity_threshold}.\n")
-    f.write(f"Total number of such speakers: {len(adults_high_similarity_sorted)} out of {len(adults_speaker_wavs)}.\n")
-    f.write(f"Speaker ID, Gender, Similarity score\n")
-    for id, sim in adults_high_similarity_sorted:
-        f.write(f"{id},{ids_and_genders_dict[id]},{sim}\n")
 
-#Rename the output adult speaker folders (adding gender '_m' or '_f' to the speaker id folder name)
-for speaker_folder in speaker_folders:
-    dir_path = os.path.join(OUTPUTDIR, speaker_folder)
-    os.rename(dir_path, dir_path + "_" + ids_and_genders_dict[speaker_folder].lower())
+def main(args):
+    adults_wav_fpaths = get_adults_wavpaths(args.adults_dir)
+    kids_wav_fpaths = get_kids_wavpaths(args.kids_dir)
+
+    ids_and_genders_dict = get_genders_dict(args.adults_dir)
+
+    # specify if grouping all child speakers into one 'CMU speaker' by setting avg_child to True
+    adults_speaker_wavs, kids_speaker_wavs = get_grouped_wavs(adults_wav_fpaths, kids_wav_fpaths, avg_child=True)
+
+    embeds_adults, embeds_kids = get_embeds(adults_speaker_wavs, kids_speaker_wavs)
+
+    utt_sim_mx, adults_high_sim = compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, embeds_kids)
+
+    # sort similarities in descending order, using sorted() for backwards compatibility (below Python v3.7), returns a sorted list of tuples.
+    adults_high_sim_sorted = sorted(adults_high_sim.items(), key=operator.itemgetter(1), reverse=True)
+
+    with open(os.path.join(args.out_dir, 'speaker_similarities.txt'), "w") as f:
+        f.write(f"Similarity scores of adult speakers from {args.adults_dir} that are above {args.sim_thresh}.\n")
+        f.write(f"Total number of such speakers: {len(adults_high_sim_sorted)} out of {len(adults_speaker_wavs)}.\n")
+        f.write(f"Speaker ID, Gender, Similarity score\n")
+        for id, sim in adults_high_sim_sorted:
+            f.write(f"{id},{ids_and_genders_dict[id]},{sim}\n")
+
+    #Rename the output adult speaker folders (adding gender '_m' or '_f' to the speaker id folder name)
+    speaker_folders = next(os.walk(args.out_dir))[1] # get the speaker folders names we copied
+    for speaker_folder in speaker_folders:
+        dir_path = os.path.join(args.out_dir, speaker_folder)
+        new_name = dir_path + "_" + ids_and_genders_dict[speaker_folder].lower()
+        os.rename(dir_path, new_name)
+        logging.info(f"{dir_path} renamed to {new_name}")
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        description="Run speaker encoder on Librispeech dataset and create new folder with speakers that have highest cosine similarity in embeddings space compared to CMU kids speakers.")
+    parser.add_argument("--adults_dir", type=str, required=True,
+                        help="Path to an existing folder (has Librispeech/LibriTTS folder structure) containing adult speakers folders. Example: /path/to/LibriSpeech-train-clean-100/LibriSpeech/train-clean-100")
+    parser.add_argument("--kids_dir", type=str, required=True,
+                        help="Path to an existing folder (has CMU folder structure) containing child speakers folders.")
+    parser.add_argument("--out_dir", type=str, required=True,
+                        help="Path to a new output folder (will have Librispeech folder structure) to create that will contain adult speakers with similarity scores above threshold. Speaker folder names will be suffixed with gender.")
+    parser.add_argument("--sim_thresh", type=str, required=True,
+                        help="The cosine similarity threshold between an adult speaker and child speaker to filter adult speakers by.")
+
+    # parse command line arguments
+    args = parser.parse_args()
+
+    # set the cosine similarity threshold for adult speakers
+    # similarity_threshold = 0.65
+
+    # define the root output folder that will contain subfolders of adult speakers in Librispeech format
+    # the adult speakers selected will be the ones with the highest similarity to child speakers.
+    # we will build this folder using this script.
+    # OUTPUTDIR = f"/workspace/projects/Alignment/wav2vec2_alignment/speaker_encoder_outputs/Librispeech-train-clean-100-similarity-above-{similarity_threshold}"
+    # ADULTS_CORPUS = "/workspace/datasets/LibriSpeech-train-clean-100/LibriSpeech/train-clean-100" # Librispeech path
+    # KIDS_CORPUS = "/workspace/datasets/cmu_kids_test"
+
+    # setup logging to both console and logfile
+    utils.setup_logging(args.out_dir, 'adult_speakers_filtering.log', console=True, filemode='a')
+
+    # start timing how long it takes to run script
+    tic = time.perf_counter()
+    # log the command that started the script
+    logging.info(f"Started script via: {' '.join(sys.argv)}")
+
+    main(args)
+
+    toc = time.perf_counter()
+    logging.info(f"Finished processing in {time.strftime('%H:%M:%Ss', time.gmtime(toc - tic))}")
