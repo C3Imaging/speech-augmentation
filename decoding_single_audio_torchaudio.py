@@ -26,7 +26,7 @@ if __name__ == "__main__":
 
     # initialise greedy CTC decoder with no language model
     greedy_decoder = decoding_utils_torch.GreedyCTCDecoder(labels)
-
+    a = files.tokens
     # initialise beam search decoder with language model
     beam_search_decoder = torchaudio.models.decoder.ctc_decoder(
         lexicon=files.lexicon, # giant file of English "words"

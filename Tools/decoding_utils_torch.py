@@ -43,8 +43,10 @@ def get_speech_data_lists(dirpath, filenames):
 
 
 class GreedyCTCDecoder(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, labels, blank=0):
         super().__init__()
+        self.labels = labels
+        self.blank = blank
 
     def forward(self, emissions: torch.Tensor, labels=None, blank=0):
         """Given a sequence emission over labels, get the best path
@@ -60,7 +62,7 @@ class GreedyCTCDecoder(torch.nn.Module):
         indices = torch.argmax(emission, dim=-1)  # [num_seq,]
         indices = torch.unique_consecutive(indices, dim=-1)
         indices = [i for i in indices if i != blank]
-        joined = "".join([labels[i] for i in indices])
+        joined = "".join([self.labels[i] for i in indices])
 
         return joined.replace("|", " ").strip().split()
 

@@ -39,7 +39,8 @@ if __name__ == "__main__":
     decoder_args = Namespace(**{'nbest': 1})
     generator = W2lViterbiDecoder(decoder_args, target_dict)
 
-    feature = get_feature(WAV_PATH)
+    feature, _ = get_feature(WAV_PATH)
+    feature = feature.cuda()
     input["source"] = feature.unsqueeze(0)
 
     padding_mask = torch.BoolTensor(input["source"].size(1)).fill_(False).unsqueeze(0)

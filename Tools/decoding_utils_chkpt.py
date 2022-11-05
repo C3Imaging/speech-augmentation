@@ -1,5 +1,5 @@
 import torch
-import soundfile as sf
+import torchaudio
 from argparse import Namespace
 import torch.nn.functional as F
 from fairseq.models.wav2vec.wav2vec2_asr import Wav2Vec2CtcConfig
@@ -35,9 +35,9 @@ def get_feature(filepath):
             feats = F.layer_norm(feats, feats.shape)
         return feats
 
-    wav, sample_rate = sf.read(filepath)
-    feats = torch.from_numpy(wav).float()
-    feats = postprocess(feats, sample_rate)
-    feats = feats.cuda()
 
-    return feats
+    wavs, sample_rate = torchaudio.load(filepath)
+    feats = wavs[0]
+    feats = postprocess(feats, sample_rate)
+
+    return feats, sample_rate
