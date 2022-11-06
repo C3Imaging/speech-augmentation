@@ -369,7 +369,7 @@ class CfgWav2Vec2_GreedyDecoder_Factory(Wav2Vec2_Decoder_Factory):
         return CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path), GreedyDecoder(vocab_path_or_bundle=vocab_path)
 
 
-def test_main():
+def test_main() -> None:
     # TODO: make proper testing functions
     # test inference on one audio file
     wav_filepath = "/workspace/datasets/myst_test/myst_999465_2009-17-12_00-00-00_MS_4.2_024.wav"
