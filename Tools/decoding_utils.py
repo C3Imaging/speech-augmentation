@@ -22,8 +22,7 @@ class BaseWav2Vec2Model(ABC):
     vocab_path_or_bundle: str
     sample_rate: int
 
-    @abstractmethod
-    def __init__(self, device: torch.device, model_filepath: str, vocab_path_or_bundle: str) -> None:
+    def __init__(self, vocab_path_or_bundle: str) -> None:
         """Constructor for a model from a checkpoint (.pt) filepath or a torchaudio bundle."""
         self.vocab_path_or_bundle = vocab_path_or_bundle
     
@@ -41,8 +40,8 @@ class BaseWav2Vec2Model(ABC):
 
 # wav2vec2 ASR models (concrete implementations)
 class TorchaudioWav2Vec2Model(BaseWav2Vec2Model):
-    def __init__(self, device: torch.device, model_filepath: str = '', vocab_path_or_bundle: str = '') -> None:
-        super().__init__(device, model_filepath, vocab_path_or_bundle)
+    def __init__(self, device: torch.device, vocab_path_or_bundle: str = '') -> None:
+        super().__init__(vocab_path_or_bundle)
         # if the passed in string is a torchaudio bundle
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is not None, "ERROR!!! Please specify the torchaudio bundle to use as this wav2vec2 model."
         bundle = eval(vocab_path_or_bundle)
@@ -60,7 +59,7 @@ class TorchaudioWav2Vec2Model(BaseWav2Vec2Model):
 
 class ArgsWav2Vec2Model(BaseWav2Vec2Model):
     def __init__(self, device: torch.device, model_filepath: str, vocab_path_or_bundle: str) -> None:
-        super().__init__(device, model_filepath, vocab_path_or_bundle)
+        super().__init__(vocab_path_or_bundle)
 
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "ERROR!!! Cannot specify a torchaudio bundle as this wav2vec2 model's vocab, please specify a path to a txt file instead."
         w2v = torch.load(model_filepath)
@@ -109,7 +108,7 @@ class ArgsWav2Vec2Model(BaseWav2Vec2Model):
 
 class CfgWav2Vec2Model(BaseWav2Vec2Model):
     def __init__(self, device: torch.device, model_filepath: str, vocab_path_or_bundle: str) -> None:
-        super().__init__(device, model_filepath, vocab_path_or_bundle)
+        super().__init__(vocab_path_or_bundle)
 
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "ERROR!!! Cannot specify a torchaudio bundle as this wav2vec2 model's vocab, please specify a path to a txt file instead."
         w2v = torch.load(model_filepath)
@@ -179,9 +178,12 @@ class BaseDecoder(ABC):
 
 # ASR decoders (concrete implementations)
 class GreedyDecoder(BaseDecoder):
-    # tested to work with a torchaudio wav2vec2 ASR model
+    """This algorithm does not explore all possibilities: it takes a sequence of local, hard decisions (about the best question to split the data)
+     and does not backtrack. It does not guarantee to find the globally-optimal tree.
+    """
     def __init__(self, vocab_path_or_bundle: str) -> None:
         # the vocabulary of chars known by the acoustic model that will be used for decoding
+        # vocab is passed to the decoder object during initialisation
         vocab = self._get_vocab(vocab_path_or_bundle)
         self.decoder = decoding_utils_torch.GreedyCTCDecoder(vocab)
 
@@ -195,9 +197,8 @@ class GreedyDecoder(BaseDecoder):
 
 
 class BeamSearchKenLMDecoder(BaseDecoder):
-    # tested to work with a torchaudio TorchaudioWav2Vec2Model ASR model
     def __init__(self, vocab_path_or_bundle: str) -> None:
-        
+        # vocab is passed to the decoder object during initialisation
         vocab = self._get_vocab(vocab_path_or_bundle)
 
         # get KenLM language model config
@@ -231,12 +232,15 @@ class BeamSearchKenLMDecoder(BaseDecoder):
 
 
 class ViterbiDecoder(BaseDecoder):
-    # tested to work under the fairseq framework
+    """The Viterbi algorithm is not a greedy algorithm.
+    It performs a global optimisation and guarantees to find the most likely state sequence, by exploring all possible state sequences.
+    """
     def __init__(self, vocab_path_or_bundle: str) -> None:
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to ViterbiDecoder, must use a txt file."
         target_dict = Dictionary.load(vocab_path_or_bundle)
         # define additional decoder args
         decoder_args = Namespace(**{'nbest': 1})
+        # vocab is passed to the decoder object during initialisation
         self.decoder = W2lViterbiDecoder(decoder_args, target_dict)
 
     def generate(self, emission_mx: torch.Tensor) -> str:
