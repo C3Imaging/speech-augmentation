@@ -25,19 +25,21 @@ def get_config_dict(args):
 
 
 def get_feature(filepath):
-    def postprocess(feats, sample_rate):
-        if feats.dim == 2:
+    # preprocess a single audio file for inference
+    def postprocess(feats):
+        if feats.dim() == 2:
             feats = feats.mean(-1)
 
         assert feats.dim() == 1, feats.dim()
 
         with torch.no_grad():
             feats = F.layer_norm(feats, feats.shape)
+
         return feats
 
 
     wavs, sample_rate = torchaudio.load(filepath)
     feats = wavs[0]
-    feats = postprocess(feats, sample_rate)
+    feats = postprocess(feats)
 
     return feats, sample_rate

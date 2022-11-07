@@ -2,17 +2,16 @@
 
 import torch
 import re
-import os
 import torchaudio
-from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict, Any
-import decoding_utils_chkpt, decoding_utils_torch
-from fairseq.models.wav2vec.wav2vec2_asr import Wav2VecCtc, Wav2Vec2CtcConfig
-from fairseq.data import Dictionary
-from fairseq.data.data_utils import post_process
 from argparse import Namespace
 from omegaconf import OmegaConf
+from abc import ABC, abstractmethod
+from fairseq.data import Dictionary
+from typing import List, Tuple, Any
+import decoding_utils_chkpt, decoding_utils_torch
+from fairseq.data.data_utils import post_process
 from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder
+from fairseq.models.wav2vec.wav2vec2_asr import Wav2VecCtc, Wav2Vec2CtcConfig
 
 
 # wav2vec2 ASR model abstract class
@@ -28,14 +27,7 @@ class BaseWav2Vec2Model(ABC):
     
     @abstractmethod
     def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
-        """Runs inference on a single preprocessed audio input, returning the emissions matrix."""
-
-    def _load_audio(self, filepath: str, device: torch.device, trg_sample_rate: int) -> torch.Tensor:
-        """load an audio file from a path and resample to the model's sampling rate if needed."""
-        waveform, sr = torchaudio.load(filepath)
-        if sr != trg_sample_rate:
-            waveform = torchaudio.functional.resample(waveform, sr, trg_sample_rate)
-        return waveform.to(device)[0]
+        """Runs inference on a single audio file input, first preprocessing the audio as required by the model and then returning the emissions matrix."""
 
 
 # wav2vec2 ASR models (concrete implementations)
@@ -49,8 +41,12 @@ class TorchaudioWav2Vec2Model(BaseWav2Vec2Model):
         self.sample_rate = bundle.sample_rate
 
     def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
-        """Inference is called directly in torchaudio to get the emissions matrix (the prediction) from the ASR model."""
-        waveform = self._load_audio(filepath=filepath, device=device, trg_sample_rate=self.sample_rate)
+        waveforms, sr = torchaudio.load(filepath)
+        if sr != self.sample_rate:
+            # torchaudio loads even a single sample as a batch with B=1
+            waveforms = torchaudio.functional.resample(waveforms, sr, self.sample_rate)
+        waveform = waveforms.to(device)[0]
+
         emissions, _ = self.model(waveform.unsqueeze(0)) # add a batch dimension
         emission_mx = emissions[0]
 
@@ -82,7 +78,11 @@ class ArgsWav2Vec2Model(BaseWav2Vec2Model):
     def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
         """Inference is not called directly in the fairseq framework API but is done through a decoder, but I copy-pasted the actual inference part from
             fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
-        waveform = self._load_audio(filepath=filepath, device=device, trg_sample_rate=self.sample_rate)
+        waveform, sr = decoding_utils_chkpt.get_feature(filepath)
+        if sr != self.sample_rate:
+            waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
+        waveform = waveform.to(device)
+
         sample, input = dict(), dict()
         input["source"] = waveform.unsqueeze(0)
         padding_mask = torch.BoolTensor(input["source"].size(1)).fill_(False).unsqueeze(0)
@@ -131,7 +131,11 @@ class CfgWav2Vec2Model(BaseWav2Vec2Model):
     def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
         """Inference is not called directly in the fairseq framework API but is done through a decoder, but I copy-pasted the actual inference part from
             fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
-        waveform = self._load_audio(filepath=filepath, device=device, trg_sample_rate=self.sample_rate)
+        waveform, sr = decoding_utils_chkpt.get_feature(filepath)
+        if sr != self.sample_rate:
+            waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
+        waveform = waveform.to(device)
+
         sample, input = dict(), dict()
         input["source"] = waveform.unsqueeze(0)
         padding_mask = torch.BoolTensor(input["source"].size(1)).fill_(False).unsqueeze(0)
