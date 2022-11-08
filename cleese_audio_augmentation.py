@@ -138,11 +138,13 @@ def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=F
                     raise Exception(f'The folder {path_to_original_recording_session} does not have an alignments folder! Please ensure all recording session folders for all speakers have an alignments folder by running forced_alignment_librispeech.py script first.')
                         
                 # create time shift BPF function to apply to the audio content
+
                 # make a list of stretch factors for all words
-                words_stretch = [1. for _ in range(len(start_time_list))]
+                words_stretch = [1. for _ in range(len(start_time_list))] # do not time stretch words by default
                 # make a list of stretch factors for all white spaces (silences)
                 # the stop times of each word is logically equivalent to the start times of each silence
-                space_stretch = [1.8 for _ in range(len(stop_time_list))]
+                space_stretch = [1.8 for _ in range(len(stop_time_list))] # stretch the time of silences by the factor
+
                 # Create corresponding timestamps and time shift factors arrays over the entire audio content,
                 #  interleaving the starts of words and silences as the edges for the BPF.
                 # Each index in time_stamps defines the start time of a word or a silence, and the corresponding index
@@ -160,8 +162,8 @@ def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=F
                 for duration_idx in range(len(word_space_durations)):
                     if word_space_durations[duration_idx] > 0.7: #check the value of each duration (looking for longer durations)
                         # assume that word_space_durations[0] is a word and not a silence, meaning words will have an odd index
-                        if duration_idx%2 != 0: #and check if longer duration corresponds to a word rather than a space
-                            # stretch the long words even more than shorter words, by increasing their corresponding stretch factor from 1.8 to 2.0
+                        if duration_idx % 2 != 0: # and check if longer duration corresponds to a word rather than a space
+                            # stretch the long words by modifying their corresponding stretch factor from the default defined in words_stretch with the new stretch factor
                             stretch_factors[duration_idx] = 2.0 #change the stretch factor from 1.8 to 2.0 for longer words 
                 # create overall time stretch BPF to apply on the audio content of this wav file
                 stretch_givenBPF = np.column_stack((time_stamps, stretch_factors))
