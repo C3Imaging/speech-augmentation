@@ -164,7 +164,7 @@ def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=F
                         # assume that word_space_durations[0] is a word and not a silence, meaning words will have an odd index
                         if duration_idx % 2 != 0: # and check if longer duration corresponds to a word rather than a space
                             # stretch the long words by modifying their corresponding stretch factor from the default defined in words_stretch with the new stretch factor
-                            stretch_factors[duration_idx] = 2.0 #change the stretch factor from 1.8 to 2.0 for longer words 
+                            stretch_factors[duration_idx] = 2.0 #change the stretch factor from zero to 2.0 for longer words (double the time of long words)
                 # create overall time stretch BPF to apply on the audio content of this wav file
                 stretch_givenBPF = np.column_stack((time_stamps, stretch_factors))
                 # apply augmentation to the audio file, saving the result to STRETCH_OUTPUTDIR
