@@ -1,8 +1,10 @@
 # using principles of dependency injection and dependency inversion and creating factories to simplify API of using wav2vec2 models loaded in different ways + various decoders for ASR inference
 
 import re
+import os
 import torch
 import torchaudio
+import fileinput
 from typing import List, Any
 from argparse import Namespace
 from omegaconf import OmegaConf
@@ -10,8 +12,37 @@ from abc import ABC, abstractmethod
 from fairseq.data import Dictionary
 import decoding_utils_chkpt, decoding_utils_torch
 from fairseq.data.data_utils import post_process
-from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder
+from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder, W2lKenLMDecoder, W2lFairseqLMDecoder
 from fairseq.models.wav2vec.wav2vec2_asr import Wav2VecCtc, Wav2Vec2CtcConfig
+
+
+def convert_to_upper(filepath):
+    """utility script that converts words in a vocab file to upper case and overwrites the file line by line."""
+    # skip conversion if words are already upper case (assume that if the first line's word is upper cased, then all lines are)
+    f = open(filepath, 'r')
+    first_word = f.readline().split(' ')[0]
+    if first_word.isupper():
+        f.close()
+        return False
+    f.close()
+            
+    # Opening a file with fileinput.input while specifying inplace=True copies the original input file to a backup file before being erased of its contents,
+    #  so a check is performed prior to opening wth fileinput.
+    with fileinput.input(files=(filepath), inplace=True) as file:
+        for line in file:
+            # assumes format of vocab file has word as the first element on a line and elements are separated by a space
+            word_and_freq = line.split(' ')
+            
+            if word_and_freq[0].isupper():
+                break
+            
+            word_and_freq[0] = word_and_freq[0].upper()
+            new_line = ' '.join(word_and_freq)
+            # By specifying inplace=True, the standard output is redirected to the original file which is now considered the output file,
+            #  thus enabling in place overwriting.
+            # The backup file is deleted when the output file is closed.
+            print('{}'.format(new_line), end='') # end='' suppresses the addition of a newline character as the line already contains one
+    return True
 
 
 # wav2vec2 ASR model abstract class
@@ -200,7 +231,8 @@ class GreedyDecoder(BaseDecoder):
         return transcript.lower()
 
 
-class BeamSearchKenLMDecoder(BaseDecoder):
+class BeamSearchKenLMDecoder_Torch(BaseDecoder):
+    """Lexicon-based beam search decoder with a KenLM 4-gram language model from torchaudio implementation."""
     def __init__(self, vocab_path_or_bundle: str) -> None:
         # vocab is passed to the decoder object during initialisation
         vocab = self._get_vocab(vocab_path_or_bundle)
@@ -236,16 +268,91 @@ class BeamSearchKenLMDecoder(BaseDecoder):
 
 
 class ViterbiDecoder(BaseDecoder):
-    """The Viterbi algorithm is not a greedy algorithm.
+    """Viterbi decoder from fairseq implementation.
+    The Viterbi algorithm is not a greedy algorithm.
     It performs a global optimisation and guarantees to find the most likely state sequence, by exploring all possible state sequences.
+    It does not use a language model as a postprocessing step for decoding the transcript.
     """
     def __init__(self, vocab_path_or_bundle: str) -> None:
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to ViterbiDecoder, must use a txt file."
         target_dict = Dictionary.load(vocab_path_or_bundle)
-        # define additional decoder args
+        # specify the number of best predictions to keep
         decoder_args = Namespace(**{'nbest': 1})
         # vocab is passed to the decoder object during initialisation
         self.decoder = W2lViterbiDecoder(decoder_args, target_dict)
+
+    def generate(self, emission_mx: torch.Tensor) -> str:
+        hypo = self.decoder.decode(emission_mx.unsqueeze(0)) # add a batch dimension
+        hyp_pieces = self.decoder.tgt_dict.string(hypo[0][0]["tokens"].int().cpu())
+        transcript = post_process(hyp_pieces, 'letter')
+
+        return transcript.lower()
+
+
+class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
+    """Lexicon-based beam search decoder with a KenLM 4-gram language model from fairseq implementation.
+    More consistent to be used with wav2vec2 acoustic models checkpoint files that were trained in the fairseq framework.
+    """
+    def __init__(self, vocab_path_or_bundle: str) -> None:
+        assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to BeamSearchKenLMDecoder_Fairseq, must use a txt file."
+        target_dict = Dictionary.load(vocab_path_or_bundle)
+        # specify non-default decoder arguments as a dict that is then converted to a Namespace object
+        decoder_args = {
+            'kenlm_model': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lm_librispeech_kenlm_word_4g_200kvocab.bin", # path to KenLM binary, found at https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
+            # used for both lexicon-based and lexicon-free beam search decoders
+            'nbest': 1, # number of best hypotheses to keep, a property of parent class (W2lDecoder)
+            'beam': 500, # beam length
+            'beam_threshold': 25.0,
+            'lm_weight': 2.0,
+            'sil_weight': 0.0, # the silence token's weight
+            # lexicon-based specific
+            'lexicon': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
+            'word_score': -1.0,
+            'unk_weight': float('-inf'), # the unknown token's weight
+        }
+        decoder_args = Namespace(**decoder_args)
+        # vocab is passed to the decoder object during initialisation
+        self.decoder = W2lKenLMDecoder(decoder_args, target_dict)
+
+    def generate(self, emission_mx: torch.Tensor) -> str:
+        hypo = self.decoder.decode(emission_mx.unsqueeze(0)) # add a batch dimension
+        hyp_pieces = self.decoder.tgt_dict.string(hypo[0][0]["tokens"].int().cpu())
+        transcript = post_process(hyp_pieces, 'letter')
+
+        return transcript.lower()
+
+
+class TransformerDecoder(BaseDecoder):
+    """Lexicon-based beam search decoder with a Transformer language model from fairseq implementation.
+    The pretrained fairseq Transformer language model mentioned in the original wav2vec2 paper is used (Librispeech)."""
+    def __init__(self, vocab_path_or_bundle: str) -> None:
+            assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to TransformerDecoder, must use a txt file."
+            target_dict = Dictionary.load(vocab_path_or_bundle) # path to the freq table of chars used to finetune the wav2vec2 model.
+            # Path to folder that contains the trained TransformerLM binary.
+            # Download the .pt file from https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
+            # NOTE: there must also be a 'dict.txt' file in the folder.
+            # This is the freq table of words used to train the LM (usually trained on Librispeech). 
+            # Download the TransformerLM dict file (called 'lm_librispeech_word_transformer.dict') from the same link as above and rename it to 'dict.txt'.
+            # Make sure all characters are upper cased!
+            transformerLM_root_folder = "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/transformer_lm/"
+            convert_to_upper(os.path.join(transformerLM_root_folder, 'dict.txt'))
+            # specify non-default decoder arguments as a dict that is then converted to a Namespace object
+            decoder_args = {
+                'kenlm_model': os.path.join(transformerLM_root_folder, "lm_librispeech_word_transformer.pt"),
+                # used for both lexicon-based and lexicon-free beam search decoders
+                'nbest': 1, # number of best hypotheses to keep, a property of parent class (W2lDecoder)
+                'beam': 500, # beam length
+                'beam_threshold': 25.0,
+                'lm_weight': 2.0,
+                'sil_weight': 0.0, # the silence token's weight
+                # lexicon-based specific
+                'lexicon': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
+                'word_score': -1.0,
+                'unk_weight': float('-inf'), # the unknown token's weight
+            }
+            decoder_args = Namespace(**decoder_args)
+            # vocab is passed to the decoder object during initialisation
+            self.decoder = W2lFairseqLMDecoder(decoder_args, target_dict)
 
     def generate(self, emission_mx: torch.Tensor) -> str:
         hypo = self.decoder.decode(emission_mx.unsqueeze(0)) # add a batch dimension
@@ -300,100 +407,145 @@ class Wav2Vec2_Decoder_Factory():
         return ASR_Decoder_Pair(TorchaudioWav2Vec2Model(device=device, vocab_path_or_bundle=bundle_str),
                                 GreedyDecoder(vocab_path_or_bundle=bundle_str))
 
-    # returns a torchaudio wav2vec2 model and a beam search decoder coupled with a KenLM language model.
+    # returns a torchaudio wav2vec2 model and a beam search decoder coupled with a KenLM language model also from torchaudio.
     @classmethod
     def get_torchaudio_beamsearchkenlm(cls, bundle_str: str = 'torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H') -> ASR_Decoder_Pair:
         # using largest available wav2vec2 model from torchaudio
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(TorchaudioWav2Vec2Model(device=device, vocab_path_or_bundle=bundle_str),
-                                BeamSearchKenLMDecoder(vocab_path_or_bundle=bundle_str))
+                                BeamSearchKenLMDecoder_Torch(vocab_path_or_bundle=bundle_str))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a Viterbi decoder.
+    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a Viterbi decoder from fairseq.
     @classmethod
     def get_args_viterbi(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 ViterbiDecoder(vocab_path_or_bundle=vocab_path))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a Viterbi decoder.
+    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a Viterbi decoder from fairseq.
     @classmethod
     def get_cfg_viterbi(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 ViterbiDecoder(vocab_path_or_bundle=vocab_path))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a KenLM language model.
+    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a greedy decoder.
     @classmethod
     def get_args_greedy(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 GreedyDecoder(vocab_path_or_bundle=vocab_path))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a KenLM language model.
+    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a greedy decoder.
     @classmethod
     def get_cfg_greedy(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 GreedyDecoder(vocab_path_or_bundle=vocab_path))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a KenLM language model.
+    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a KenLM language model from torchaudio.
     @classmethod
-    def get_args_beamsearchkenlm(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
+    def get_args_beamsearchkenlm_torch(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
-                                BeamSearchKenLMDecoder(vocab_path_or_bundle=vocab_path))
+                                BeamSearchKenLMDecoder_Torch(vocab_path_or_bundle=vocab_path))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a KenLM language model.
+    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a KenLM language model from torchaudio.
     @classmethod
-    def get_cfg_beamsearchkenlm(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
+    def get_cfg_beamsearchkenlm_torch(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
-                                BeamSearchKenLMDecoder(vocab_path_or_bundle=vocab_path))
+                                BeamSearchKenLMDecoder_Torch(vocab_path_or_bundle=vocab_path))
+
+    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a KenLM language model from fairseq.
+    @classmethod
+    def get_args_beamsearchkenlm_fairseq(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
+                                BeamSearchKenLMDecoder_Fairseq(vocab_path_or_bundle=vocab_path))
+
+    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a KenLM language model from fairseq.
+    @classmethod
+    def get_cfg_beamsearchkenlm_fairseq(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
+                                BeamSearchKenLMDecoder_Fairseq(vocab_path_or_bundle=vocab_path))
+
+    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a Transformer language model from fairseq.
+    @classmethod
+    def get_args_beamsearchtransformerlm(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
+                                TransformerDecoder(vocab_path_or_bundle=vocab_path))
+
+    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a Transformer language model from fairseq.
+    @classmethod
+    def get_cfg_beamsearchtransformerlm(cls, model_filepath: str, vocab_path: str) -> ASR_Decoder_Pair:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
+                                TransformerDecoder(vocab_path_or_bundle=vocab_path))
 
 
 def main() -> None:
     # model configs
     bundle_str = "torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H"
+    # wav2vec2 models checkpoints that were trained in the fairseq framework
     args_model_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/w2v_fairseq/wav2vec2_vox_960h_new.pt"
     cfg_model_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/vox_55h/checkpoints/checkpoint_best.pt"
+    # vocab dicts used during the training of the corresponding wav2vec2 models trained in the fairseq framework
     args_vocab_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/w2v_fairseq/dict.ltr.txt"
     cfg_vocab_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/vox_55h/dict.ltr.txt"
     # audio samples to test inference on
     wavpaths = ["/workspace/datasets/myst_test/myst_999465_2009-17-12_00-00-00_MS_4.2_024.wav",
                 "/workspace/datasets/myst_test/myst_002030_2014-02-28_09-37-51_LS_1.1_006.wav"]
 
-    # test torchaudio wav2vec2 + greedy decoder -> works
-    asr1 = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy(bundle_str=bundle_str)
-    transcripts1 = asr1.infer(wavpaths)
+    # # test torchaudio wav2vec2 + greedy decoder -> works
+    # asr1 = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy(bundle_str=bundle_str)
+    # transcripts1 = asr1.infer(wavpaths)
 
-    # test torchaudio wav2vec2 + beam search decoder with KenLM language model -> works
-    asr2 = Wav2Vec2_Decoder_Factory.get_torchaudio_beamsearchkenlm(bundle_str=bundle_str)
-    transcripts2 = asr2.infer(wavpaths)
+    # # test torchaudio wav2vec2 + beam search decoder with KenLM language model from torchaudio -> works
+    # asr2 = Wav2Vec2_Decoder_Factory.get_torchaudio_beamsearchkenlm(bundle_str=bundle_str)
+    # transcripts2 = asr2.infer(wavpaths)
 
-    # test args wav2vec2 + viterbi -> works
-    asr3 = Wav2Vec2_Decoder_Factory.get_args_viterbi(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    transcripts3 = asr3.infer(wavpaths)
+    # # test args wav2vec2 + viterbi from fairseq -> works
+    # asr3 = Wav2Vec2_Decoder_Factory.get_args_viterbi(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
+    # transcripts3 = asr3.infer(wavpaths)
 
-    # test cfg wav2vec2 + viterbi -> works
-    asr4 = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    transcripts4 = asr4.infer(wavpaths)
+    # # test cfg wav2vec2 + viterbi from fairseq -> works
+    # asr4 = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    # transcripts4 = asr4.infer(wavpaths)
 
-    # test args wav2vec2 + greedy decoder -> works
-    asr5 = Wav2Vec2_Decoder_Factory.get_args_greedy(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    transcripts5 = asr5.infer(wavpaths)
+    # # test args wav2vec2 + greedy decoder -> works
+    # asr5 = Wav2Vec2_Decoder_Factory.get_args_greedy(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
+    # transcripts5 = asr5.infer(wavpaths)
 
-    # test cfg wav2vec2 + greedy decoder -> works
-    asr6 = Wav2Vec2_Decoder_Factory.get_cfg_greedy(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    transcripts6 = asr6.infer(wavpaths)
+    # # test cfg wav2vec2 + greedy decoder -> works
+    # asr6 = Wav2Vec2_Decoder_Factory.get_cfg_greedy(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    # transcripts6 = asr6.infer(wavpaths)
 
-    # test args wav2vec2 + beam search decoder with KenLM language model -> works
-    asr7 = Wav2Vec2_Decoder_Factory.get_args_beamsearchkenlm(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    transcripts7 = asr7.infer(wavpaths)
+    # # test args wav2vec2 + beam search decoder with KenLM language model from torchaudio -> works
+    # asr7 = Wav2Vec2_Decoder_Factory.get_args_beamsearchkenlm_torch(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
+    # transcripts7 = asr7.infer(wavpaths)
 
-    # test cfg wav2vec2 + beam search decoder with KenLM language model -> works
-    asr8 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    transcripts8 = asr8.infer(wavpaths)
+    # # test cfg wav2vec2 + beam search decoder with KenLM language model from torchaudio-> works
+    # asr8 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_torch(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    # transcripts8 = asr8.infer(wavpaths)
 
+    # test args wav2vec2 + beam search decoder with KenLM language model from fairseq-> works
+    asr9 = Wav2Vec2_Decoder_Factory.get_args_beamsearchkenlm_fairseq(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
+    transcripts9 = asr9.infer(wavpaths)
+
+    # test cfg wav2vec2 + beam search decoder with KenLM language model from fairseq -> works
+    asr10 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_fairseq(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    transcripts10 = asr10.infer(wavpaths)
+
+    # test args wav2vec2 + beam search decoder with Transformer language model from fairseq -> works
+    asr11 = Wav2Vec2_Decoder_Factory.get_args_beamsearchtransformerlm(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
+    transcripts11 = asr11.infer(wavpaths)
+
+    # test cfg wav2vec2 + beam search decoder with Transformer language model from fairseq -> works
+    asr12 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    transcripts12 = asr12.infer(wavpaths)
 
 if __name__ == "__main__":
     main()
