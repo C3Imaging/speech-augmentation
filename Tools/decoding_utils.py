@@ -2,22 +2,27 @@
 
 import re
 import os
+import math
 import torch
-import torchaudio
 import fileinput
+import torchaudio
+from tqdm import tqdm
 from typing import List, Any
 from argparse import Namespace
 from omegaconf import OmegaConf
 from abc import ABC, abstractmethod
 from fairseq.data import Dictionary
-import decoding_utils_chkpt, decoding_utils_torch
 from fairseq.data.data_utils import post_process
+if __name__ == "__main__":
+    import decoding_utils_chkpt, decoding_utils_torch
+else:
+    from . import decoding_utils_chkpt, decoding_utils_torch
 from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder, W2lKenLMDecoder, W2lFairseqLMDecoder
 from fairseq.models.wav2vec.wav2vec2_asr import Wav2VecCtc, Wav2Vec2CtcConfig
 
 
 def convert_to_upper(filepath):
-    """utility script that converts words in a vocab file to upper case and overwrites the file line by line."""
+    """Utility script that converts words in a vocab file to upper case and overwrites the file line by line."""
     # skip conversion if words are already upper case (assume that if the first line's word is upper cased, then all lines are)
     f = open(filepath, 'r')
     first_word = f.readline().split(' ')[0]
@@ -57,8 +62,8 @@ class BaseWav2Vec2Model(ABC):
         self.vocab_path_or_bundle = vocab_path_or_bundle
     
     @abstractmethod
-    def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
-        """Runs inference on a single audio file input, first preprocessing the audio as required by the model and then returning the emissions matrix."""
+    def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
+        """Runs inference on a batch of audio samples, first preprocessing the audio as required by the model and then returning the emissions matrices."""
 
 
 # wav2vec2 ASR models (concrete implementations)
@@ -71,17 +76,17 @@ class TorchaudioWav2Vec2Model(BaseWav2Vec2Model):
         self.model = bundle.get_model().to(device)
         self.sample_rate = bundle.sample_rate
 
-    def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
-        waveforms, sr = torchaudio.load(filepath)
+    def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
+        """can only perform single audio file inference."""
+        waveform, sr = torchaudio.load(filepaths[0])
         if sr != self.sample_rate:
             # torchaudio loads even a single sample as a batch with B=1
-            waveforms = torchaudio.functional.resample(waveforms, sr, self.sample_rate)
-        waveform = waveforms.to(device)[0]
+            waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
+        waveform = waveform.to(device)[0]
 
         emissions, _ = self.model(waveform.unsqueeze(0)) # add a batch dimension
-        emission_mx = emissions[0]
 
-        return emission_mx
+        return emissions
 
 
 class ArgsWav2Vec2Model(BaseWav2Vec2Model):
@@ -106,18 +111,18 @@ class ArgsWav2Vec2Model(BaseWav2Vec2Model):
         self.model.eval()
         self.sample_rate = w2v['args'].sample_rate
 
-    def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
+    def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
         """Inference is not called directly in the fairseq framework API but is done through a decoder, but I copy-pasted the actual inference part from
-            fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
-        waveform, sr = decoding_utils_chkpt.get_feature(filepath)
+        fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
+        waveforms, sr = decoding_utils_chkpt.get_features_list(filepaths)
         if sr != self.sample_rate:
-            waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
-        waveform = waveform.to(device)
+            waveforms = [torchaudio.functional.resample(waveform, sr, self.sample_rate) for waveform in waveforms]
+        padded_features, padding_masks = decoding_utils_chkpt.get_padded_batch_mxs(waveforms)
+        padded_features = padded_features.to(device)
 
         sample, input = dict(), dict()
-        input["source"] = waveform.unsqueeze(0)
-        padding_mask = torch.BoolTensor(input["source"].size(1)).fill_(False).unsqueeze(0)
-        input["padding_mask"] = padding_mask
+        input["source"] = padded_features
+        input["padding_mask"] = padding_masks
         sample["net_input"] = input
 
         encoder_input = {
@@ -132,9 +137,8 @@ class ArgsWav2Vec2Model(BaseWav2Vec2Model):
         else:
             emissions = self.model.get_normalized_probs(encoder_out, log_probs=True)
         emissions = emissions.transpose(0, 1).float().cpu().contiguous()
-        emission_mx = emissions[0]
 
-        return emission_mx
+        return emissions
 
 
 class CfgWav2Vec2Model(BaseWav2Vec2Model):
@@ -159,18 +163,18 @@ class CfgWav2Vec2Model(BaseWav2Vec2Model):
         self.model.eval()
         self.sample_rate = w2v['cfg']['task']['sample_rate']
 
-    def forward(self, filepath: str, device: torch.device) -> torch.Tensor:
+    def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
         """Inference is not called directly in the fairseq framework API but is done through a decoder, but I copy-pasted the actual inference part from
-            fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
-        waveform, sr = decoding_utils_chkpt.get_feature(filepath)
+        fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
+        waveforms, sr = decoding_utils_chkpt.get_features_list(filepaths)
         if sr != self.sample_rate:
-            waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
-        waveform = waveform.to(device)
+            waveforms = [torchaudio.functional.resample(waveform, sr, self.sample_rate) for waveform in waveforms]
+        padded_features, padding_masks = decoding_utils_chkpt.get_padded_batch_mxs(waveforms)
+        padded_features = padded_features.to(device)
 
         sample, input = dict(), dict()
-        input["source"] = waveform.unsqueeze(0)
-        padding_mask = torch.BoolTensor(input["source"].size(1)).fill_(False).unsqueeze(0)
-        input["padding_mask"] = padding_mask
+        input["source"] = padded_features
+        input["padding_mask"] = padding_masks
         sample["net_input"] = input
 
         encoder_input = {
@@ -185,9 +189,8 @@ class CfgWav2Vec2Model(BaseWav2Vec2Model):
         else:
             emissions = self.model.get_normalized_probs(encoder_out, log_probs=True)
         emissions = emissions.transpose(0, 1).float().cpu().contiguous()
-        emission_mx = emissions[0]
 
-        return emission_mx
+        return emissions
 
 
 # ASR decoder abstract class
@@ -196,8 +199,8 @@ class BaseDecoder(ABC):
     decoder: Any # different decoders do not have a common interface
 
     @abstractmethod
-    def generate(self, emission_mx: torch.Tensor) -> str:
-        """Generates a transcript by decoding the output of a wav2vec2 ASR acoutic model."""
+    def generate(self, emission_mx: torch.Tensor) -> List[str]:
+        """Generates a list of transcripts by decoding the output batch of a wav2vec2 ASR acoutic model."""
 
     @staticmethod
     def _get_vocab(vocab_path_or_bundle: str) -> List[str]:
@@ -214,7 +217,7 @@ class BaseDecoder(ABC):
 # ASR decoders (concrete implementations)
 class GreedyDecoder(BaseDecoder):
     """This algorithm does not explore all possibilities: it takes a sequence of local, hard decisions (about the best question to split the data)
-     and does not backtrack. It does not guarantee to find the globally-optimal tree.
+    and does not backtrack. It does not guarantee to find the globally-optimal tree.
     """
     def __init__(self, vocab_path_or_bundle: str) -> None:
         # the vocabulary of chars known by the acoustic model that will be used for decoding
@@ -222,13 +225,17 @@ class GreedyDecoder(BaseDecoder):
         vocab = self._get_vocab(vocab_path_or_bundle)
         self.decoder = decoding_utils_torch.GreedyCTCDecoder(vocab)
 
-    def generate(self, emission_mx: torch.Tensor) -> str:
+    def generate(self, emission_mx: torch.Tensor) -> List[str]:
         # generate one transcript
         # decoded phrase as a list of words
-        result = self.decoder(emission_mx.unsqueeze(0)) # add a batch dimension
-        transcript = ' '.join(result)
+        # emission_mx should have a batch dimension
+        transcripts = []
+        for i in range(emission_mx.size(dim=0)):
+            result = self.decoder([emission_mx[i]])
+            transcript = ' '.join(result).lower()
+            transcripts.append(transcript)
 
-        return transcript.lower()
+        return transcripts
 
 
 class BeamSearchKenLMDecoder_Torch(BaseDecoder):
@@ -258,20 +265,27 @@ class BeamSearchKenLMDecoder_Torch(BaseDecoder):
             word_score=-0.26,
         )
 
-    def generate(self, emission_mx: torch.Tensor) -> str:
-        emissions = emission_mx.unsqueeze(0) # add a batch dimension
-        # select the decoded phrase as a list of words from the prediction of the first beam (most likely transcript)
-        result = self.decoder(emissions.cpu().detach())[0][0].words 
-        transcript = ' '.join(result)
+    def generate(self, emission_mx: torch.Tensor) -> List[str]:
+        # emission_mx should have a batch dimension
+        transcripts = []
+        results = self.decoder(emission_mx.cpu().detach())
+        for i in range(emission_mx.size(dim=0)):
+            # select the decoded phrase as a list of words from the prediction of the first beam (most likely transcript)
+            result = results[i][0].words
+            transcript = ' '.join(result).lower()
+            transcripts.append(transcript)
 
-        return transcript.lower()
+        return transcripts
 
 
 class ViterbiDecoder(BaseDecoder):
     """Viterbi decoder from fairseq implementation.
-    The Viterbi algorithm is not a greedy algorithm.
+    Theoretically, the Viterbi algorithm is not a greedy algorithm.
     It performs a global optimisation and guarantees to find the most likely state sequence, by exploring all possible state sequences.
     It does not use a language model as a postprocessing step for decoding the transcript.
+
+    However, in the fairseq library 'Viterbi' is used as the name of their greedy decoder, 
+    which simply finds the most likely token at each timestep without context, using only acoustic model predictions.
     """
     def __init__(self, vocab_path_or_bundle: str) -> None:
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to ViterbiDecoder, must use a txt file."
@@ -281,12 +295,12 @@ class ViterbiDecoder(BaseDecoder):
         # vocab is passed to the decoder object during initialisation
         self.decoder = W2lViterbiDecoder(decoder_args, target_dict)
 
-    def generate(self, emission_mx: torch.Tensor) -> str:
-        hypo = self.decoder.decode(emission_mx.unsqueeze(0)) # add a batch dimension
-        hyp_pieces = self.decoder.tgt_dict.string(hypo[0][0]["tokens"].int().cpu())
-        transcript = post_process(hyp_pieces, 'letter')
+    def generate(self, emission_mx: torch.Tensor) -> List[str]:
+        # emission_mx should have a batch dimension
+        hypos = self.decoder.decode(emission_mx) # add a batch dimension
+        transcripts = [post_process(self.decoder.tgt_dict.string(h[0]['tokens'].int().cpu()), 'letter').lower() for h in hypos]
 
-        return transcript.lower()
+        return transcripts
 
 
 class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
@@ -301,9 +315,12 @@ class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
             'kenlm_model': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lm_librispeech_kenlm_word_4g_200kvocab.bin", # path to KenLM binary, found at https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
             # used for both lexicon-based and lexicon-free beam search decoders
             'nbest': 1, # number of best hypotheses to keep, a property of parent class (W2lDecoder)
-            'beam': 500, # beam length
-            'beam_threshold': 25.0,
-            'lm_weight': 2.0,
+            
+            # see ref: https://github.com/flashlight/flashlight/blob/main/flashlight/app/asr/README.md#2-beam-search-optimization
+            'beam': 500, # beam length (how many top tokens to keep at each timestep and therefore how many top hypotheses to generate after decoding all timesteps)
+            'beam_threshold': 25.0, # at each timestep, tokens whose score gaps from the highest scored token are larger than the threshold are discarded
+
+            'lm_weight': 2.0, # how much the LM scores affect the hypotheses' scores
             'sil_weight': 0.0, # the silence token's weight
             # lexicon-based specific
             'lexicon': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
@@ -314,17 +331,18 @@ class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
         # vocab is passed to the decoder object during initialisation
         self.decoder = W2lKenLMDecoder(decoder_args, target_dict)
 
-    def generate(self, emission_mx: torch.Tensor) -> str:
-        hypo = self.decoder.decode(emission_mx.unsqueeze(0)) # add a batch dimension
-        hyp_pieces = self.decoder.tgt_dict.string(hypo[0][0]["tokens"].int().cpu())
-        transcript = post_process(hyp_pieces, 'letter')
+    def generate(self, emission_mx: torch.Tensor) -> List[str]:
+        # emission_mx should have a batch dimension
+        hypos = self.decoder.decode(emission_mx) # add a batch dimension
+        transcripts = [post_process(self.decoder.tgt_dict.string(h[0]['tokens'].int().cpu()), 'letter').lower() for h in hypos]
 
-        return transcript.lower()
+        return transcripts
 
 
 class TransformerDecoder(BaseDecoder):
     """Lexicon-based beam search decoder with a Transformer language model from fairseq implementation.
-    The pretrained fairseq Transformer language model mentioned in the original wav2vec2 paper is used (Librispeech)."""
+    The pretrained fairseq Transformer language model mentioned in the original wav2vec2 paper is used (Librispeech).
+    """
     def __init__(self, vocab_path_or_bundle: str) -> None:
             assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to TransformerDecoder, must use a txt file."
             target_dict = Dictionary.load(vocab_path_or_bundle) # path to the freq table of chars used to finetune the wav2vec2 model.
@@ -334,7 +352,7 @@ class TransformerDecoder(BaseDecoder):
             # This is the freq table of words used to train the LM (usually trained on Librispeech). 
             # Download the TransformerLM dict file (called 'lm_librispeech_word_transformer.dict') from the same link as above and rename it to 'dict.txt'.
             # Make sure all characters are upper cased!
-            transformerLM_root_folder = "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/transformer_lm/"
+            transformerLM_root_folder = "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/transformer_lm"
             convert_to_upper(os.path.join(transformerLM_root_folder, 'dict.txt'))
             # specify non-default decoder arguments as a dict that is then converted to a Namespace object
             decoder_args = {
@@ -354,35 +372,60 @@ class TransformerDecoder(BaseDecoder):
             # vocab is passed to the decoder object during initialisation
             self.decoder = W2lFairseqLMDecoder(decoder_args, target_dict)
 
-    def generate(self, emission_mx: torch.Tensor) -> str:
-        hypo = self.decoder.decode(emission_mx.unsqueeze(0)) # add a batch dimension
-        hyp_pieces = self.decoder.tgt_dict.string(hypo[0][0]["tokens"].int().cpu())
-        transcript = post_process(hyp_pieces, 'letter')
+    def generate(self, emission_mx: torch.Tensor) -> List[str]:
+        # emission_mx should have a batch dimension
+        hypos = self.decoder.decode(emission_mx) # add a batch dimension
+        transcripts = [post_process(self.decoder.tgt_dict.string(h[0]['tokens'].int().cpu()), 'letter').lower() for h in hypos]
 
-        return transcript.lower()
+        return transcripts
 
 
 class ASR_Decoder_Pair():
     """A bundle representing a particular combination of an ASR model and decoder.
-    The combination is stored in this single object to prevent using an ASR model and decoder that are incompatible or that were initialised with different vocabs."""
+    The combination is stored in this single object to prevent using an ASR model and decoder that are incompatible or that were initialised with different vocabs.
+    """
 
     def __init__(self, model: BaseWav2Vec2Model, decoder: BaseDecoder) -> None:
         self.model = model
         self.decoder = decoder
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def infer(self, filepaths: List[str]) -> List[str]:
-        """performs single or batched inference on a list of audio filepath(s) using a particular combination of ASR model and decoder"""
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def _infer_sequential(self, filepaths: List[str]) -> List[str]:
+        """Performs sequential inference on a list of audio filepath(s), processed one at a time, using a particular combination of ASR model and decoder."""
 
         transcripts = []
-        for filepath in filepaths:
-            emission_mx = self.model.forward(filepath, device)
-            transcript = self.decoder.generate(emission_mx)
+        for filepath in tqdm(filepaths, total=len(filepaths), unit=" transcript", desc="Generating transcripts predictions sequentially, so far"):
+            emission_mx = self.model.forward([filepath], self.device)
+            transcript = self.decoder.generate(emission_mx)[0]
             transcripts.append(transcript)
         
-        for transcript in transcripts:
-            print(transcript)
+        # for transcript in transcripts:
+        #     print(transcript)
+
+        return transcripts
+
+    def infer(self, filepaths: List[str], batch_size=0) -> List[str]:
+        """Performs minibatched inference on a list of audio sample(s) specified by the filepath(s), using a particular combination of ASR model and decoder.
+        If batch_size=0, performs sequential inference where audio samples are processed one at a time.
+        If batch_size=len(filepaths), performs batched inference where all audio samples are processed at one time as a single input matrix.
+        If 0 < batch_size < len(filepaths), performs minibatch inference.
+        Only ASR inference is batched, while audio preprocessing and decoding is done sequentially, sample by sample."""
+        # initialise the transcripts list for all files
+        transcripts = []
+
+        if batch_size == 0 or batch_size == 1:
+            # sequential inference
+            transcripts = self._infer_sequential(filepaths)
+        else:
+            # minibatch inference
+            assert batch_size <= len(filepaths), "ERROR: batch_size must be less than or equal to the number of audio samples to process for inference."
+            for i in tqdm(range(0, len(filepaths), batch_size), total=int(math.ceil(len(filepaths)/batch_size)), unit=" minibatch", desc="Generating transcripts in minibatches, so far"):
+                a = filepaths[i:i+batch_size]
+                emission_mx = self.model.forward(filepaths[i:i+batch_size], self.device)
+                transcripts.append(self.decoder.generate(emission_mx))
+
+            # flatten the minibatch lists
+            transcripts = [transcript for minilist in transcripts for transcript in minilist]
 
         return transcripts
 
@@ -497,55 +540,62 @@ def main() -> None:
     cfg_vocab_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/vox_55h/dict.ltr.txt"
     # audio samples to test inference on
     wavpaths = ["/workspace/datasets/myst_test/myst_999465_2009-17-12_00-00-00_MS_4.2_024.wav",
-                "/workspace/datasets/myst_test/myst_002030_2014-02-28_09-37-51_LS_1.1_006.wav"]
+                "/workspace/datasets/myst_test/myst_002030_2014-02-28_09-37-51_LS_1.1_006.wav",
+                "/workspace/datasets/myst_valid/002013/myst_002013_2014-03-11_11-14-16_LS_2.1_042.wav",
+                "/workspace/datasets/myst_valid/002013/myst_002013_2014-03-11_11-14-16_LS_2.1_043.wav",
+                "/workspace/datasets/myst_valid/002013/myst_002013_2014-03-11_11-14-16_LS_2.1_045.wav",
+                "/workspace/datasets/myst_valid/002013/myst_002013_2014-03-11_11-14-16_LS_2.1_048.wav",
+                "/workspace/datasets/myst_valid/002013/myst_002013_2014-03-11_11-14-16_LS_2.1_051.wav",
+                ]
 
     # # test torchaudio wav2vec2 + greedy decoder -> works
     # asr1 = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy(bundle_str=bundle_str)
-    # transcripts1 = asr1.infer(wavpaths)
+    # transcripts1 = asr1.infer(wavpaths, batch_size=3)
 
     # # test torchaudio wav2vec2 + beam search decoder with KenLM language model from torchaudio -> works
     # asr2 = Wav2Vec2_Decoder_Factory.get_torchaudio_beamsearchkenlm(bundle_str=bundle_str)
-    # transcripts2 = asr2.infer(wavpaths)
+    # transcripts2 = asr2.infer(wavpaths, batch_size=3)
 
     # # test args wav2vec2 + viterbi from fairseq -> works
     # asr3 = Wav2Vec2_Decoder_Factory.get_args_viterbi(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    # transcripts3 = asr3.infer(wavpaths)
+    # transcripts3 = asr3.infer(wavpaths, batch_size=3)
 
-    # # test cfg wav2vec2 + viterbi from fairseq -> works
-    # asr4 = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    # transcripts4 = asr4.infer(wavpaths)
+    # test cfg wav2vec2 + viterbi from fairseq -> works
+    asr4 = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    transcripts4 = asr4.infer(wavpaths, batch_size=3)
 
     # # test args wav2vec2 + greedy decoder -> works
     # asr5 = Wav2Vec2_Decoder_Factory.get_args_greedy(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    # transcripts5 = asr5.infer(wavpaths)
+    # transcripts5 = asr5.infer(wavpaths, batch_size=3)
 
     # # test cfg wav2vec2 + greedy decoder -> works
     # asr6 = Wav2Vec2_Decoder_Factory.get_cfg_greedy(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    # transcripts6 = asr6.infer(wavpaths)
+    # transcripts6 = asr6.infer(wavpaths, batch_size=3)
 
     # # test args wav2vec2 + beam search decoder with KenLM language model from torchaudio -> works
     # asr7 = Wav2Vec2_Decoder_Factory.get_args_beamsearchkenlm_torch(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    # transcripts7 = asr7.infer(wavpaths)
+    # transcripts7 = asr7.infer(wavpaths, batch_size=3)
 
     # # test cfg wav2vec2 + beam search decoder with KenLM language model from torchaudio-> works
     # asr8 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_torch(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    # transcripts8 = asr8.infer(wavpaths)
+    # transcripts8 = asr8.infer(wavpaths, batch_size=3)
 
-    # test args wav2vec2 + beam search decoder with KenLM language model from fairseq-> works
-    asr9 = Wav2Vec2_Decoder_Factory.get_args_beamsearchkenlm_fairseq(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    transcripts9 = asr9.infer(wavpaths)
+    # # test args wav2vec2 + beam search decoder with KenLM language model from fairseq-> works
+    # asr9 = Wav2Vec2_Decoder_Factory.get_args_beamsearchkenlm_fairseq(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
+    # transcripts9 = asr9.infer(wavpaths, batch_size=3)
 
-    # test cfg wav2vec2 + beam search decoder with KenLM language model from fairseq -> works
-    asr10 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_fairseq(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    transcripts10 = asr10.infer(wavpaths)
+    # # test cfg wav2vec2 + beam search decoder with KenLM language model from fairseq -> works
+    # asr10 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_fairseq(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    # transcripts10 = asr10.infer(wavpaths, batch_size=3)
 
-    # test args wav2vec2 + beam search decoder with Transformer language model from fairseq -> works
-    asr11 = Wav2Vec2_Decoder_Factory.get_args_beamsearchtransformerlm(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
-    transcripts11 = asr11.infer(wavpaths)
+    # # test args wav2vec2 + beam search decoder with Transformer language model from fairseq -> works
+    # asr11 = Wav2Vec2_Decoder_Factory.get_args_beamsearchtransformerlm(model_filepath=args_model_filepath, vocab_path=args_vocab_filepath)
+    # transcripts11 = asr11.infer(wavpaths, batch_size=3)
 
-    # test cfg wav2vec2 + beam search decoder with Transformer language model from fairseq -> works
-    asr12 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
-    transcripts12 = asr12.infer(wavpaths)
+    # # test cfg wav2vec2 + beam search decoder with Transformer language model from fairseq -> works
+    # asr12 = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=cfg_model_filepath, vocab_path=cfg_vocab_filepath)
+    # transcripts12 = asr12.infer(wavpaths, batch_size=3)
+
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,24 @@
 import os
 import sys
 import csv
+import time
 import logging
+
+
+class Profiler():
+    """Generic profiler that can time the execution of a function by calling start before the function call and stop after the function call and outputs the result via the logger."""
+    def __init__(self) -> None:
+        # log the command that started the script
+        logging.info(f"Started script via: {' '.join(sys.argv)}")
+    
+    def start(self):
+        # start timing how long it takes to run script
+        self.start_time = time.perf_counter()
+
+    def stop(self):
+        # stop timing and log how long the script took to run
+        end_time = time.perf_counter()
+        logging.info(f"Finished processing in {time.strftime('%H:%M:%Ss', time.gmtime(end_time - self.start_time))}")
 
 
 def setup_logging(arg_folder, filename, console=False, filemode='w+'):

@@ -4,6 +4,7 @@ Models/
 single_audio_outputs/
 speaker_encoder_outputs/
 cleese_outputs/
+infer_outputs/
 test*.py
 
 

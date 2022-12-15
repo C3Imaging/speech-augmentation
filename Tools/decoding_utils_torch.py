@@ -65,34 +65,3 @@ class GreedyCTCDecoder(torch.nn.Module):
         joined = "".join([self.labels[i] for i in indices])
 
         return joined.replace("|", " ").strip().split()
-
-
-class BeamSearchDecoder(torch.nn.Module):
-    def __init__(self, lm_files=torchaudio.models.decoder.download_pretrained_files("librispeech-4-gram")):
-        super().__init__()
-        self.beam_search_decoder = torchaudio.models.decoder.ctc_decoder(
-            lexicon=lm_files.lexicon, # giant file of English "words"
-            tokens=lm_files.tokens, # same as wav2vec2's vocab list
-            lm=lm_files.lm, # path to language model binary
-            nbest=3,
-            beam_size=1500,
-            lm_weight=3.23,
-            word_score=-0.26,
-        )
-
-    def forward(self, emissions: torch.Tensor, labels=None, blank=0):
-        """Given a sequence emission over labels, get the best path
-        Args:
-        emissions (List[tensor]): Logit tensors. Shape `[batch_size, num_seq, num_label]`.
-        labels (List[str]): Vocabulary of the wav2vec2 model that produced the emissions tensor.
-        blank (int): blank token from CTC formulation.
-
-        NOTE: for BeamSearchDecoder labels and blank are not needed, but are part of the method signature so this decoder
-        can be called in a loop with other decoders that do require this signature (hack solution)
-
-        Returns:
-        List[str]: The resulting transcript
-        """
-        emission = emissions.cpu().detach()
-        
-        return self.beam_search_decoder(emission)[0][0].words
