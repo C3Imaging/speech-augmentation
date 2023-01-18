@@ -46,17 +46,19 @@ def main(args):
     if len(gt_tr_paths):
         with open(os.path.join(args.out_dir, "reference.txt"), 'w') as ref_file:
             for gt_tr_path in gt_tr_paths:
-                # get unique id of transcript file
-                id = gt_tr_path.split('/')[-1].split('.txt')[0].split('myst_')[-1]
+                # create unique id of audio sample by including leaf folder in the id
+                temp = gt_tr_path.split('/')[-2:] # [0] = subfolder, [1] = ____.txt
+                temp[-1] = temp[-1].split('.txt')[0] # remove '.txt'
+                id = '/'.join(temp)
                 f = open(gt_tr_path, "r")
-                tr = f.read().strip()
+                tr = f.read().strip().lower()
                 f.close()
                 ref_file.write(f"{tr} ({id})\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run ASR inference using a wav2vec2 checkpoint file and a dataset of audio files. Saves hypothesis transcripts to a new output folder.")
+        description="Run ASR inference using a wav2vec2 checkpoint file and a dataset of audio files. Saves hypothesis transcripts to a new output folder. If ground truth transcript files exist, compile and save them in one file, so script output files ready to be processed by sclite.")
     parser.add_argument("--in_dir", type=str, required=True,
                         help="Path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files.")
     parser.add_argument("--out_dir", type=str, required=True,
