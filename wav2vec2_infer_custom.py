@@ -7,22 +7,25 @@ from Tools.decoding_utils import Wav2Vec2_Decoder_Factory
 
 
 def main(args):
-    # get all wav files
-    wav_paths = list(Path(args.in_dir).glob("**/*.wav"))
+    # get all wav files as strings
+    wav_paths = list(map(lambda x: str(x), list(Path(args.in_dir).glob("**/*.wav"))))
     # get accompanying ground truth transcripts files
-    gt_tr_paths = list(Path(args.in_dir).glob("**/*.txt"))
+    gt_tr_paths = list(map(lambda x: str(x), list(Path(args.in_dir).glob("**/*.txt"))))
+    # filter out vocab file, hypothesis.txt file, and reference.txt file
+    gt_tr_paths = list(filter(lambda x: not ("dict" in x or "hypothesis" in x or "reference" in x), gt_tr_paths))
     wav_paths.sort()
     gt_tr_paths.sort()
 
+    # # DEBUG CODE: find unmatching <wav,txt> files pairs
     # wavs_train = list(Path(args.in_dir).glob("kids_train/*.wav"))
     # wavs_test = list(Path(args.in_dir).glob("kids_test/*.wav"))
     # trs_train = list(Path(args.in_dir).glob("kids_train/*.txt"))
     # trs_test = list(Path(args.in_dir).glob("kids_test/*.txt"))
-    # wavs_train_ids = [str(f).split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wavs_train]
-    # trs_train_ids = [str(f).split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in trs_train]
+    # wavs_train_ids = [f.split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wavs_train]
+    # trs_train_ids = [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in trs_train]
     # missing_from_wavs = list(sorted(set(trs_train_ids) - set(wavs_train_ids)))
 
-    assert [str(f).split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wav_paths] == [str(f).split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in gt_tr_paths], "number of and order of must be the same for audio and text filenames."
+    assert [f.split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wav_paths] == [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in gt_tr_paths], "number of and order of must be the same for audio and text filenames."
 
     # create model + decoder pair
 
@@ -34,15 +37,17 @@ def main(args):
     # populate hypothesis.txt
     with open(os.path.join(args.out_dir, "hypothesis.txt"), 'w') as hyp_file:
         for hyp, wav_path in zip(hypos, wav_paths):
-            # get unique id of audio sample
-            id = str(wav_path).split('/')[-1].split('.wav')[0].split('myst_')[-1]
+            # create unique id of audio sample by including leaf folder in the id
+            temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
+            temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
+            id = '/'.join(temp)
             hyp_file.write(f"{hyp} ({id})\n")
     # if there are ground truth transcripts accompanying the audio files, populate reference.txt
     if len(gt_tr_paths):
         with open(os.path.join(args.out_dir, "reference.txt"), 'w') as ref_file:
             for gt_tr_path in gt_tr_paths:
                 # get unique id of transcript file
-                id = str(gt_tr_path).split('/')[-1].split('.txt')[0].split('myst_')[-1]
+                id = gt_tr_path.split('/')[-1].split('.txt')[0].split('myst_')[-1]
                 f = open(gt_tr_path, "r")
                 tr = f.read().strip()
                 f.close()
@@ -51,7 +56,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run speaker encoder on Librispeech dataset and create new folder with speakers that have highest cosine similarity in embeddings space compared to CMU kids speakers.")
+        description="Run ASR inference using a wav2vec2 checkpoint file and a dataset of audio files. Saves hypothesis transcripts to a new output folder.")
     parser.add_argument("--in_dir", type=str, required=True,
                         help="Path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files.")
     parser.add_argument("--out_dir", type=str, required=True,
