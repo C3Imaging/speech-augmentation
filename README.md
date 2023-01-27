@@ -7,11 +7,13 @@ The main functionalities for the augmentation pipeline can be broken down into t
 - **forced_alignment_librispeech.py**: runs forced alignment on Librispeech speakers using wav2vec2.0 ASR model and the Trellis matrix backtracking traversal algorithm to predict timestamps for words in the audio dataset. **NOTE:** transcript files for the audio data are required. The [torchaudio](https://pytorch.org/audio/stable/index.html) library is used here.
 - **cleese_audio_augmentation.py**: augments the pitch and time duration characteristics of original adult audio data from a multispeaker dataset. The [CLEESE](https://github.com/neuro-team-femto/cleese) library is used here.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+## Audio Augmentation Pipeline
 
-## License
-For open source projects, say how it is licensed.
+### Step 1: Selecting Suitable Adult Candidate Speakers
+We first run the **Compute_librispeech_cmukids_similarities.py** script on Librispeech train-clean-100 dataset + CMU kids dataset. The output produces a text file listing the adult speakers with a cosine similarity score above a specified threshold.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### Step 2: Generate Timestamps for Suitable Adult Speakers' Transcripts
+After selecting the suitable adult speakers according to Step 1, we copy the selected speaker folders from Librispeech train-clean-100 to a new folder, so we have a dataset of only the selected speakers. Then we run **forced_alignment_librispeech.py** on that folder. This will populate the new folder with outputted text files with alignments (timestamps) for the words in the transcript files.
+
+### Step 3: Generate Augmented Dataset
+Using the adult speakers dataset with time alignments as the input, we run **cleese_audio_augmentation.py** to produce an identically structured dataset of augmented speakers.
