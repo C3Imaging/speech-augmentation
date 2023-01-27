@@ -1,7 +1,3 @@
-On this page
-
-[[_TOC_]]
-
 # Introduction
 
 This Git project provides the open source scripts used for multispeaker adult audio dataset augmentation, detailed in our paper [](). Our first experimentations augment the [Librispeech](https://www.openslr.org/12/) train-clean-100 dataset, and we use the [CMU kids](https://catalog.ldc.upenn.edu/LDC97S63) dataset for computing child speaker embeddings.<br />
