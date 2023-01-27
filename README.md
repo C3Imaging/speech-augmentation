@@ -4,7 +4,7 @@ On this page
 
 # Introduction
 
-This Git project provides the open source scripts used for multispeaker adult audio dataset augmentation. Our first experimentations augment the [Librispeech](https://www.openslr.org/12/) train-clean-100 dataset, and we use the [CMU kids](https://catalog.ldc.upenn.edu/LDC97S63) dataset for computing child speaker embeddings.<br />
+This Git project provides the open source scripts used for multispeaker adult audio dataset augmentation, detailed in our paper [](). Our first experimentations augment the [Librispeech](https://www.openslr.org/12/) train-clean-100 dataset, and we use the [CMU kids](https://catalog.ldc.upenn.edu/LDC97S63) dataset for computing child speaker embeddings.<br />
 
 The main functionalities for the augmentation pipeline can be broken down into the following scripts:<br />
 - **Compute_librispeech_cmukids_similarities.py**: computes the cosine similarity between adult speakers' embedding averaged over all utterances for that speaker to the average child speaker from the CMU kids multispeaker audio dataset. The [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) library is used here.
