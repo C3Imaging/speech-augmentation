@@ -10,8 +10,8 @@ This Git project provides the open source scripts used for multispeaker adult au
 
 The main functionalities for the augmentation pipeline can be broken down into the following scripts:<br />
 - [**Compute_librispeech_cmukids_similarities.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/Compute_librispeech_cmukids_similarities.py): computes the cosine similarity between adult speakers' embedding averaged over all utterances for that speaker to the average child speaker from the CMU kids multispeaker audio dataset. The [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) library is used here.
-- **forced_alignment_librispeech.py**: runs forced alignment on Librispeech speakers using wav2vec2.0 ASR model and the Trellis matrix backtracking traversal algorithm to predict timestamps for words in the audio dataset. **NOTE:** transcript files for the audio data are required. The [torchaudio](https://pytorch.org/audio/stable/index.html) library is used here.
-- **cleese_audio_augmentation.py**: augments the pitch and time duration characteristics of original adult audio data from a multispeaker dataset. The [CLEESE](https://github.com/neuro-team-femto/cleese) library is used here.
+- [**forced_alignment_librispeech.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/forced_alignment_librispeech.py): runs forced alignment on Librispeech speakers using wav2vec2.0 ASR model and the Trellis matrix backtracking traversal algorithm to predict timestamps for words in the audio dataset. **NOTE:** transcript files for the audio data are required. The [torchaudio](https://pytorch.org/audio/stable/index.html) library is used here.
+- [**cleese_audio_augmentation.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/cleese_audio_augmentation.py): augments the pitch and time duration characteristics of original adult audio data from a multispeaker dataset. The [CLEESE](https://github.com/neuro-team-femto/cleese) library is used here.
 
 ## Audio Augmentation Experiments Reproduction Steps
 
