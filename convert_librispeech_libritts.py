@@ -1,6 +1,10 @@
 import os
+import sys
 import argparse
+from pydub import AudioSegment
 from Tools import librispeech_utils
+
+sys.path.append("/usr/bin/ffmpeg")
 
 
 def copy_orig_tr():
@@ -25,23 +29,33 @@ def main():
     for dirpath, _, filenames in os.walk(args.folder, topdown=asleaf): # if topdown=True, read contents of folder before subfolders, otherwise the reverse logic applies
         # get list of speech files and corresponding transcripts from a single folder
         speech_files, transcripts = librispeech_utils.get_speech_data_lists(dirpath, filenames)
-        # process only those folders that contain a Librispeech transcripts text file
-        if transcripts is not None:
-            # get the list of audio samples' filenames
-            ids = list(map(lambda x: x.split('.wav')[0], speech_files))
-            # convert the transcripts into lower case sentences
-            transcripts = list(map(lambda x: x.replace('|', ' ').lower(), transcripts))
-            # write the converted transcripts into individual txt files and save them in the same folder as the audio files
-            for id, transcript in zip(ids, transcripts):
-                with open(os.path.join(dirpath, f'{id}.txt'), 'w') as f:
-                    f.write(transcript)
-            # remove original Librispeech formatted transcript file from this folder that contains audio files
-            if args.rem_orig_tr:
-                orig_tr_filename = list(filter(lambda x: "trans.txt" in x, filenames))[0]
-                if os.path.exists(os.path.join(dirpath,orig_tr_filename)): os.remove(os.path.join(dirpath,orig_tr_filename))
-            # remove any "___BPF.txt" files from this folder that contains audio files
-            if args.rem_BPF:
-                [os.remove(os.path.join(dirpath,f)) for f in filenames if "BPF.txt" in f]
+        # process only the leaf folders with the audio files
+        if speech_files:
+            # convert audio files from .flac to .wav (assume all audio files are the same format, so check only 1st elem)
+            if ".flac" in speech_files[0]:
+                for speech_file in speech_files:
+                    audio = AudioSegment.from_file(speech_file, "flac")
+                    audio.export(speech_file.replace("flac", "wav"), format="wav")
+                    os.remove(speech_file)
+            # process only those folders that contain a Librispeech transcripts text file
+            if transcripts is not None:
+                # get the list of audio samples' filenames
+                ids = list(map(lambda x: x.split('.wav')[0], speech_files))
+                # convert the transcripts into lower case sentences
+                transcripts = list(map(lambda x: x.replace('|', ' ').lower(), transcripts))
+                # write the converted transcripts into individual txt files and save them in the same folder as the audio files
+                for id, transcript in zip(ids, transcripts):
+                    if ".flac" in id:
+                        id = id.replace(".flac", "")
+                    with open(os.path.join(dirpath, f'{id}.txt'), 'w') as f:
+                        f.write(transcript)
+                # remove original Librispeech formatted transcript file from this folder that contains audio files
+                if args.rem_orig_tr:
+                    orig_tr_filename = list(filter(lambda x: "trans.txt" in x, filenames))[0]
+                    if os.path.exists(os.path.join(dirpath,orig_tr_filename)): os.remove(os.path.join(dirpath,orig_tr_filename))
+                # remove any "___BPF.txt" files from this folder that contains audio files
+                if args.rem_BPF:
+                    [os.remove(os.path.join(dirpath,f)) for f in filenames if "BPF.txt" in f]
                 
         if asleaf:
             break # to prevent reading subfolders

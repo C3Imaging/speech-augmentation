@@ -64,3 +64,5 @@ def get_speech_data_lists(dirpath, filenames):
         speech_files.sort()
 
     return speech_files, transcripts
+
+
