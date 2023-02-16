@@ -15,8 +15,6 @@ The main functionalities for the augmentation pipeline can be broken down into t
 
 ## Installation Requirements (UNIX)
 
-### pip or conda
-
 **torch**, **torchaudio** and **resemblyzer** can be installed via **pip install**.
 
 ### CLEESE
