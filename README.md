@@ -13,13 +13,38 @@ The main functionalities for the augmentation pipeline can be broken down into t
 - [**forced_alignment_librispeech.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/forced_alignment_librispeech.py): runs forced alignment on Librispeech speakers using wav2vec2.0 ASR model and the Trellis matrix backtracking traversal algorithm to predict timestamps for words in the audio dataset. **NOTE:** transcript files for the audio data are required. The [torchaudio](https://pytorch.org/audio/stable/index.html) library is used here.
 - [**cleese_audio_augmentation.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/cleese_audio_augmentation.py): augments the pitch and time duration characteristics of original adult audio data from a multi-speaker dataset. The [CLEESE](https://github.com/neuro-team-femto/cleese) library is used here.
 
-## Audio Augmentation Experiments Reproduction Steps
+## Installation Requirements (UNIX)
+
+**torch**, **torchaudio** and **resemblyzer** can be installed via **pip install**.
+
+### CLEESE
+
+- To install CLEESE from https://forum.ircam.fr/projects/detail/cleese/ you will be prompted to register for a free account first.
+- Once the zip file has been downloaded, unzip it to a convenient /path/to/cleese/
+- Then run the following command:
+```bash
+ln -s /path/to/cleese/cleese-master /usr/local/lib/python3.8/dist-packages/cleese
+```
+- Python usage:
+```python
+from cleese.cleese import cleeseProcess
+```
+- In cleeseProcess.py (source file from the downloaded library), if receiving an import error, change the import statements of cleeseBPF and cleeseEngine to: 
+```python
+from .cleeseBPF import *
+from .cleeseEngine import *
+```
+
+## Steps for Reproduction Our Audio Augmentation Experiments
 
 ### Step 1: Selecting Suitable Adult Candidate Speakers
+
 We first run the **Compute_librispeech_cmukids_similarities.py** script on Librispeech train-clean-100 dataset + CMU kids dataset. The output produces a text file listing the adult speakers with a cosine similarity score above a specified threshold.
 
 ### Step 2: Generate Timestamps for Suitable Adult Speakers' Transcripts
+
 After selecting the suitable adult speakers according to Step 1, we copy the selected speaker folders from Librispeech train-clean-100 to a new folder, so we have a dataset of only the selected speakers. Then we run **forced_alignment_librispeech.py** on that folder. This will populate the new folder with outputted text files with alignments (timestamps) for the words in the transcript files.
 
 ### Step 3: Generate Augmented Dataset
+
 Using the adult speakers dataset with time alignments as the input, we run **cleese_audio_augmentation.py** to produce an identically structured dataset of augmented speakers.
