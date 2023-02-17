@@ -31,6 +31,7 @@ def get_speech_data_lists(dirpath, filenames):
     """
     speech_files = []
     transcripts_files = []
+    transcripts = None
     # idx, transcript_filename = [(idx, os.path.join(path, filename)) for idx, filename in enumerate(filenames) if filename.endswith('.txt')][0]
     # del filenames[idx] # in place removal of transcript file by its index, creates speech filenames list
     # loop through all files found
