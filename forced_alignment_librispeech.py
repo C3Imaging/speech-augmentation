@@ -159,7 +159,7 @@ def main():
     "Setup and use wav2vec2 model for time alignment between ground truth transcript and audio file from Librispeech dataset."
     # setup inference model variables
     global bundle, model, labels, dictionary
-    bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H # wav2vec2 model trained for ASR, sample rate = 16kHz
+    bundle = torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H # wav2vec2 model trained for ASR, sample rate = 16kHz
     model = bundle.get_model().to(device) # wav2vec2 model on GPU
     labels = bundle.get_labels() # vocab of chars known to wav2vec2
     dictionary = {c: i for i, c in enumerate(labels)}
