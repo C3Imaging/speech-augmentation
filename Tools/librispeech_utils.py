@@ -33,7 +33,7 @@ def get_transcripts(filename):
 
 
 def get_speech_data_lists(dirpath, filenames):
-    """Gets the speech audio files paths and the transcripts from a single leaf folder.
+    """Gets the speech audio files paths and the transcripts from a single leaf folder in Librispeech format.
 
     Args:
       dirpath (str):
@@ -64,5 +64,3 @@ def get_speech_data_lists(dirpath, filenames):
         speech_files.sort()
 
     return speech_files, transcripts
-
-

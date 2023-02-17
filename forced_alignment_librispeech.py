@@ -11,7 +11,7 @@ import argparse
 import torchaudio
 import matplotlib
 import matplotlib.pyplot as plt
-from Tools import utils, forced_alignment_utils, librispeech_utils
+from Tools import utils, forced_alignment_utils, librispeech_utils, libritts_utils
 
 
 def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
@@ -138,7 +138,10 @@ def run_inference():
         # if this script was run previously, an output folder will be present in the folder where the audio files we want to process are, skip it and its subfolders
         if out_dir not in dirpath:
             # get list of speech files and corresponding transcripts from a single folder
-            speech_files, transcripts = librispeech_utils.get_speech_data_lists(dirpath, filenames)
+            if args.libritts:
+                speech_files, transcripts = libritts_utils.get_speech_data_lists(dirpath, filenames)
+            else:
+                speech_files, transcripts = librispeech_utils.get_speech_data_lists(dirpath, filenames)
             # process only those folders that contain a transcripts text file
             if transcripts is not None:
                 logging.info(f"starting to process folder {dirpath}")
@@ -166,7 +169,7 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run ASR inference using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech dataset. NOTE: this script can only use wav2vec2 ASR models from torchaudio library.")
+        description="Run ASR inference (decoding) using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech dataset. NOTE1: this script can only use wav2vec2 ASR models from torchaudio library. NOTE2: Script is updated with LibriTTS support, but must provide a --libritts flag.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
                         help="Path to a folder in Librispeech, can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders, or a leaf folder containing audio and a transcript file. Defaults to CWD if not provided.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
@@ -175,6 +178,8 @@ if __name__ == "__main__":
                         help="Flag used to specify whether graphs of alignments are saved for each audio file. Defaults to False if flag is not provided.")
     parser.add_argument("--save_audio", default=False, action='store_true',
                         help="Flag used to specify whether detected words are saved as audio snippets. Defaults to False if flag is not provided.")
+    parser.add_argument("--libritts", default=False, action='store_true',
+                        help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
     # parse command line arguments
     global args
     args = parser.parse_args()
