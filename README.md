@@ -52,4 +52,4 @@ After selecting the suitable adult speakers according to Step 1, we copy the sel
 
 ### Step 3: Generate Augmented Dataset
 
-Using the adult speakers dataset with time alignments as the input, we run **cleese_audio_augmentation.py** to produce an identically structured dataset of augmented speakers.
+Using the adult speakers dataset with time alignments as the input, we run **cleese_audio_augmentation.py** to produce an identically structured dataset of augmented speakers. The CLEESE configuration used for augmentation experiments can be found in the file **cleeseConfig_all_lj.py**
