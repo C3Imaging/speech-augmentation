@@ -29,7 +29,12 @@ ln -s /path/to/cleese/cleese-master /usr/local/lib/python3.8/dist-packages/clees
 ```python
 from cleese.cleese import cleeseProcess
 ```
-- In cleeseProcess.py (source file from the downloaded library), if receiving an import error, change the import statements of cleeseBPF and cleeseEngine to: 
+- If receiving an import error, then:
+1. In /path/to/cleese/cleese-master/cleese/__init__.py, change import statement to:
+```python
+from .cleeseProcess import *
+```
+2. In /path/to/cleese/cleese-master/cleese/cleeseProcess.py, change the import statements of cleeseBPF and cleeseEngine to: 
 ```python
 from .cleeseBPF import *
 from .cleeseEngine import *
@@ -47,4 +52,4 @@ After selecting the suitable adult speakers according to Step 1, we copy the sel
 
 ### Step 3: Generate Augmented Dataset
 
-Using the adult speakers dataset with time alignments as the input, we run **cleese_audio_augmentation.py** to produce an identically structured dataset of augmented speakers.
+Using the adult speakers dataset with time alignments as the input, we run **cleese_audio_augmentation.py** to produce an identically structured dataset of augmented speakers. The CLEESE configuration used for augmentation experiments can be found in the file **cleeseConfig_all_lj.py**
