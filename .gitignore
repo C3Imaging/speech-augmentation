@@ -1,6 +1,7 @@
 .vscode/
 Tools/__pycache__/
 Models/
+Temp/
 single_audio_outputs/
 speaker_encoder_outputs/
 cleese_outputs/

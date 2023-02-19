@@ -43,8 +43,12 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
         # loop through audio files
         for speech_filename, transcript in zip(speech_files, transcripts):
             # create separate subdir for experiment outputs for this speech file
+            
             # get speech segment index from the filename
-            speech_idx = speech_filename.split('.flac')[0].split('-')[-1]
+            if args.libritts:
+                speech_idx = "_".join(speech_filename.split('.wav')[0].split('_')[-2:])
+            else:
+                speech_idx = speech_filename.split('.flac')[0].split('-')[-1]
             # create output subfolder for an audio file
             cur_out_dir = os.path.join(root_cur_out_dir, speech_idx)
             if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)

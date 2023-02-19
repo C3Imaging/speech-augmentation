@@ -113,7 +113,7 @@ def get_embeds(adults_speaker_wavs, kids_speaker_wavs):
     return embeds_adults, embeds_kids
 
 
-def compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, embeds_kids):
+def compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, embeds_kids, ids_and_genders_dict):
     # Initialise a dict of 'speaker ID: similarity score' pairs for adult speakers that pass the similarity score threshold,
     #  used for creating speaker_similarities.txt
     adults_high_similarity = {}
@@ -126,7 +126,7 @@ def compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, 
     #utt_sim_matrix = np.inner(embeds_a, embeds_b)
 
     # Long, detailed version:
-    # utt_sim_matrix2[i,j] will store similarity between adult speaker i and child speaker j
+    # this: utt_sim_matrix2[i,j] -> will store similarity between adult speaker i and child speaker j
     utt_sim_matrix = np.zeros((len(embeds_adults), len(embeds_kids)))
     # loop through each adult average embedding
     for i in range(len(embeds_adults)):
@@ -144,9 +144,11 @@ def compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, 
                 adults_high_similarity[adult_speaker_id] = utt_sim_matrix[i,j]
                 # get path to adult speaker folder
                 adult_path = os.path.join(args.adults_dir, adult_speaker_id)
-                # copy everything inside the adult speaker folder (which contains recording sessions subfolders) into OUTPUTDIR/adult_speaker_id
-                copy_tree(adult_path, os.path.join(args.out_dir, adult_speaker_id))
-                logging.info(f"{os.path.join(args.out_dir, adult_speaker_id)} folder created by copying {adult_path}. Will be suffixed with gender later.")
+                # copy only female
+                if ids_and_genders_dict[adult_speaker_id] == 'F':
+                    # copy everything inside the adult speaker folder (which contains recording sessions subfolders) into OUTPUTDIR/adult_speaker_id
+                    copy_tree(adult_path, os.path.join(args.out_dir, adult_speaker_id))
+                    logging.info(f"{os.path.join(args.out_dir, adult_speaker_id)} folder created by copying {adult_path}. Will be suffixed with gender later.")
 
     return utt_sim_matrix, adults_high_similarity
 
@@ -162,7 +164,7 @@ def main(args):
 
     embeds_adults, embeds_kids = get_embeds(adults_speaker_wavs, kids_speaker_wavs)
 
-    utt_sim_mx, adults_high_sim = compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, embeds_kids)
+    utt_sim_mx, adults_high_sim = compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, embeds_kids, ids_and_genders_dict)
 
     # sort similarities in descending order, using sorted() for backwards compatibility (below Python v3.7), returns a sorted list of tuples.
     adults_high_sim_sorted = sorted(adults_high_sim.items(), key=operator.itemgetter(1), reverse=True)
@@ -172,7 +174,8 @@ def main(args):
         f.write(f"Total number of such speakers: {len(adults_high_sim_sorted)} out of {len(adults_speaker_wavs)}.\n")
         f.write(f"Speaker ID, Gender, Similarity score\n")
         for id, sim in adults_high_sim_sorted:
-            f.write(f"{id},{ids_and_genders_dict[id]},{sim}\n")
+            if ids_and_genders_dict[id] == 'F':
+                f.write(f"{id},{ids_and_genders_dict[id]},{sim}\n")
 
     #Rename the output adult speaker folders (adding gender '_m' or '_f' to the speaker id folder name)
     speaker_folders = next(os.walk(args.out_dir))[1] # get the speaker folders names we copied
