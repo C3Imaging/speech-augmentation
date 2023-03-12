@@ -145,10 +145,10 @@ def compute_similarities(adults_speaker_wavs, kids_speaker_wavs, embeds_adults, 
                 # get path to adult speaker folder
                 adult_path = os.path.join(args.adults_dir, adult_speaker_id)
                 # copy only female
-                if ids_and_genders_dict[adult_speaker_id] == 'F':
-                    # copy everything inside the adult speaker folder (which contains recording sessions subfolders) into OUTPUTDIR/adult_speaker_id
-                    copy_tree(adult_path, os.path.join(args.out_dir, adult_speaker_id))
-                    logging.info(f"{os.path.join(args.out_dir, adult_speaker_id)} folder created by copying {adult_path}. Will be suffixed with gender later.")
+                # if ids_and_genders_dict[adult_speaker_id] == 'F':
+                # copy everything inside the adult speaker folder (which contains recording sessions subfolders) into OUTPUTDIR/adult_speaker_id
+                copy_tree(adult_path, os.path.join(args.out_dir, adult_speaker_id))
+                logging.info(f"{os.path.join(args.out_dir, adult_speaker_id)} folder created by copying {adult_path}. Will be suffixed with gender later.")
 
     return utt_sim_matrix, adults_high_similarity
 
@@ -174,8 +174,7 @@ def main(args):
         f.write(f"Total number of such speakers: {len(adults_high_sim_sorted)} out of {len(adults_speaker_wavs)}.\n")
         f.write(f"Speaker ID, Gender, Similarity score\n")
         for id, sim in adults_high_sim_sorted:
-            if ids_and_genders_dict[id] == 'F':
-                f.write(f"{id},{ids_and_genders_dict[id]},{sim}\n")
+            f.write(f"{id},{ids_and_genders_dict[id]},{sim}\n")
 
     #Rename the output adult speaker folders (adding gender '_m' or '_f' to the speaker id folder name)
     speaker_folders = next(os.walk(args.out_dir))[1] # get the speaker folders names we copied
@@ -187,15 +186,14 @@ def main(args):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(
-        description="Run speaker encoder on Librispeech dataset and create new folder with speakers that have highest cosine similarity in embeddings space compared to CMU kids speakers.")
+        description="Run speaker encoder on a Librispeech/LibriTTS-formatted dataset and create new folder with speakers that have highest cosine similarity in embeddings space compared to CMU kids speakers.")
     parser.add_argument("--adults_dir", type=str, required=True,
                         help="Path to an existing folder (has Librispeech/LibriTTS folder structure) containing adult speakers folders. Example: /path/to/LibriSpeech-train-clean-100/LibriSpeech/train-clean-100")
     parser.add_argument("--kids_dir", type=str, required=True,
                         help="Path to an existing folder (has CMU folder structure) containing child speakers folders.")
     parser.add_argument("--out_dir", type=str, required=True,
-                        help="Path to a new output folder (will have Librispeech folder structure) to create that will contain adult speakers with similarity scores above threshold. Speaker folder names will be suffixed with gender.")
+                        help="Path to a new output folder (will have Librispeech/LibriTTS folder structure) to create that will contain adult speakers with similarity scores above threshold. Speaker folder names will be suffixed with gender.")
     parser.add_argument("--sim_thresh", type=str, required=True,
                         help="The cosine similarity threshold between an adult speaker and child speaker to filter adult speakers by.")
 

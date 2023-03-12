@@ -56,7 +56,10 @@ def main():
                 # remove any "___BPF.txt" files from this folder that contains audio files
                 if args.rem_BPF:
                     [os.remove(os.path.join(dirpath,f)) for f in filenames if "BPF.txt" in f]
-                
+                # remove "wav2vec2_alignments/" subfolder from this folder
+                if args.rem_alignments:
+                    import shutil
+                    if os.path.exists(os.path.join(dirpath,"wav2vec2_alignments")): shutil.rmtree(os.path.join(dirpath,"wav2vec2_alignments"))
         if asleaf:
             break # to prevent reading subfolders
 
@@ -72,6 +75,8 @@ if __name__ == "__main__":
                         help="Flag used to specify whether to remove the original transcript file. Defaults to False if flag is not provided.")
     parser.add_argument("--rem_BPF", default=False, action='store_true',
                         help="Flag used to specify whether to remove any '___BPF.txt' files. These are created by CLEESE augmentations. Defaults to False if flag is not provided.")
+    parser.add_argument("--rem_alignments", default=False, action='store_true',
+                        help="Flag used to specify whether to remove any 'wav2vec2_alignments/' folder from speaker folders, if such exists. These are created by forced alignment script. Defaults to False if flag is not provided.")
     # parse command line arguments
     global args
     args = parser.parse_args()

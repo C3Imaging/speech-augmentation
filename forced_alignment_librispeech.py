@@ -173,9 +173,9 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run ASR inference (decoding) using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech dataset. NOTE1: this script can only use wav2vec2 ASR models from torchaudio library. NOTE2: Script is updated with LibriTTS support, but must provide a --libritts flag.")
+        description="Run ASR inference (decoding) using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech/LibriTTS dataset. NOTE1: currently, this script can only use wav2vec2 ASR models from torchaudio library. NOTE2: Script is updated with LibriTTS support, but must provide a '--libritts' flag.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
-                        help="Path to a folder in Librispeech, can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders, or a leaf folder containing audio and a transcript file. Defaults to CWD if not provided.")
+                        help="Path to a folder in Librispeech/LibriTTS format, can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders, or a leaf folder containing audio and a transcript file. Defaults to CWD if not provided.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified.")
     parser.add_argument("--save_figs", default=False, action='store_true',

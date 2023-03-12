@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import time
+import shutil
 import os.path
 import logging
 import argparse
@@ -25,7 +26,7 @@ def shift (input_file, givenBPF, output_dir, transf):
     return cleese_utils.process(soundData=input_file, configFile=configFile, outputDirPath=output_dir, transfer=transfer, BPF=givenBPF)
 
 
-def apply_pitch_shifting(in_dir, out_dir, female_pitch=0, male_pitch=0):
+def apply_pitch_shifting():
     transf = 'pitch' #Set the type of transformation (Pitch transformation)
     
     # in_dir must have Librispeech folder structure and the folders inside it must have 'f' or 'm' appended, depending on gender of the speaker.
@@ -34,7 +35,7 @@ def apply_pitch_shifting(in_dir, out_dir, female_pitch=0, male_pitch=0):
     # The processing that involves generating these folders is done in the forced_alignment_librispeech.py script using wav2vec2 ASR model forced alignment prior to running this script.
 
     # get all the speaker folder names from the processed folder
-    spkr_dirs = cleese_utils.list_spkr_dirnames(in_dir)
+    spkr_dirs = cleese_utils.list_spkr_dirnames(args.in_dir)
 
     # NOTE: example BPF for Cleese process
     # times = [0.1, 0.2]
@@ -49,35 +50,42 @@ def apply_pitch_shifting(in_dir, out_dir, female_pitch=0, male_pitch=0):
             raise Exception(f'The speaker folder {spkr_dir} does not end with a gender tag! Please ensure all speaker folders have a gender tag by running Compute_librispeech_cmukids_similarities.py script first.')
         if [*spkr_dir][-1].lower() == 'f':
             # NOTE: [0.0, 0.0] must be specified as the first BPF tuple for pitch shifting to work correctly when trying to pitch shift starting at time 0.0
-            pitch_givenBPF = np.array([[0.0, 0.0], [0.0, female_pitch]]) #create pitch shift break point function for female voices
-            cur_pitch_factor = female_pitch
+            pitch_givenBPF = np.array([[0.0, 0.0], [0.0, args.female_pitch]]) #create pitch shift break point function for female voices
+            cur_pitch_factor = args.female_pitch
         else:
-            pitch_givenBPF = np.array([[0.0, 0.0], [0.0, male_pitch]])  #create pitch shift break point function for male voices
-            cur_pitch_factor = male_pitch
+            pitch_givenBPF = np.array([[0.0, 0.0], [0.0, args.male_pitch]])  #create pitch shift break point function for male voices
+            cur_pitch_factor = args.male_pitch
         # loop through the recording sessions folders of a speaker
         recording_sessions = os.listdir(spkr_dir)
         for sess in tqdm(recording_sessions, total=len(recording_sessions), unit=" recording sessions", desc=f"Pitch shifting recording sessions for speaker {spkr_dir.split('/')[-1]}, so far"):
             # Specify new output folder to create, in which to save the augmentations for this speaker.
             # It will be the speaker folder name suffixed with _pitch, while the sessions folders names are left the same.
             # Created by Cleese when calling batched processing with shift() function.
-            PITCH_OUTPUTDIR = os.path.join(out_dir, spkr_dir.split('/')[-1] + "_pitch" + str(int(cur_pitch_factor)) + "/" + sess)
+            PITCH_OUTPUTDIR = os.path.join(args.out_dir, spkr_dir.split('/')[-1] + "_pitch" + str(int(cur_pitch_factor)) + "/" + sess)
             # get all files in the recording session folder
             input_files = cleese_utils.list_file_paths(os.path.join(spkr_dir, sess))
             # get only the audio files
-            input_files = list(filter(lambda filepath: filepath.endswith('.flac') or filepath.endswith('.wav'), input_files))
+            audio_files = list(filter(lambda filepath: filepath.endswith('.flac') or filepath.endswith('.wav'), input_files))
             # loop through the files
-            for filepath in tqdm(input_files, total=len(input_files), unit=" audio files", desc=f"Pitch shifting audio files in recording session {sess}, so far"):
+            for filepath in tqdm(audio_files, total=len(audio_files), unit=" audio files", desc=f"Pitch shifting audio files in recording session {sess}, so far"):
                 # apply augmentation to each audio file, saving the result to PITCH_OUTPUTDIR
-                pass
                 shift(filepath, pitch_givenBPF, PITCH_OUTPUTDIR, transf)  #Call shift function for single file pitch shifting
+                pass # useful for debugging time shifting function, no need to recompute pitch shifts
             logging.info(f"{PITCH_OUTPUTDIR} created.")
+            # remove BPF files from folder
+            if not args.save_bpf:
+                [os.remove(os.path.join(PITCH_OUTPUTDIR,f)) for f in os.listdir(PITCH_OUTPUTDIR) if "BPF.txt" in f]
+            # copy original Librispeech transcript file into the pitch shifted dir
+            if not args.libritts_transcripts and not args.libritts:
+                orig_tr = list(filter(lambda filepath: filepath.endswith('.trans.txt'), input_files))[0]
+                shutil.copyfile(orig_tr, os.path.join(PITCH_OUTPUTDIR, orig_tr.split('/')[-1]))
        
        
-def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=False): 
+def apply_time_shifting(): 
     transf = 'stretch' #Set the type of transformation (Time stretch transformation)
     # assume time shifting is applied on the Librispeech-format folder that has pitch shifted voices
     # get all the speaker folder names from the root_dir Librispeech-format folder.
-    pitch_shifted_dirs = cleese_utils.list_spkr_dirnames(in_dir)
+    pitch_shifted_dirs = cleese_utils.list_spkr_dirnames(args.out_dir)
     pitch_shifted_dirs2 = []
     # keep only pitch shift folders that were generated in this run
     for folder in pitch_shifted_dirs:
@@ -103,13 +111,13 @@ def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=F
             # Specify new output folder to create, in which to save the augmentations, for this speaker's recording session.
             # It will be the speaker folder name suffixed with _stretch (effectively being _pitch_stretch, assuming pitch shifting was the augmentation done prior to time stretching),
             #  while the sessions folders names are left the same.
-            STRETCH_OUTPUTDIR = os.path.join(out_dir, pitch_shifted_dir.split('/')[-1] + "_stretch" + "/" + sess)
+            STRETCH_OUTPUTDIR = os.path.join(args.out_dir, pitch_shifted_dir.split('/')[-1] + "_stretch" + "/" + sess)
             # get all files in the recording session folder
             input_files = cleese_utils.list_file_paths(os.path.join(pitch_shifted_dir, sess)) #List input audio files per pitch_shifted directory
             # get only the audio files
-            input_files = list(filter(lambda filepath: filepath.endswith('.wav'), input_files))
+            audio_files = list(filter(lambda filepath: filepath.endswith('.wav'), input_files))
             # loop through the files
-            for filepath in tqdm(input_files, total=len(input_files), unit=" audio files", desc=f"Time stretching audio files in recording session {sess}, so far"):
+            for filepath in tqdm(audio_files, total=len(audio_files), unit=" audio files", desc=f"Time stretching audio files in recording session {sess}, so far"):
                 # apply augmentation to each audio file, saving the result to STRETCH_OUTPUTDIR
                 # for the words as determined by forced alignment
                 start_time_list = []
@@ -118,7 +126,7 @@ def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=F
                 # the file will contain the start and stop times for each spoken word in the audio file
                 original_speaker_id = pitch_shifted_dir.split('/')[-1]
                 original_speaker_id = '_'.join(original_speaker_id.split('_')[:2])
-                path_to_original_recording_session = os.path.join(alignments_dir, original_speaker_id, sess)
+                path_to_original_recording_session = os.path.join(args.in_dir, original_speaker_id, sess)
                 if args.libritts:
                     audio_file_id = "_".join(filepath.split("/")[-1].split(".")[0].split("_")[-2:])
                 else:
@@ -135,7 +143,7 @@ def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=F
                                 start_time_list.append(float(line.split(",")[-2]) - 0.002)
                                 # append the stop time of each word to the stop times list, with a slight time padding after the word
                                 stop_time_list.append(float(line.split(",")[-1].split("\n")[0]) + 0.005)
-                    if save_transcript and not args.libritts:
+                    if args.libritts_transcripts or args.libritts:
                         transcript = utils.get_transcript_from_alignment(alignment_filepath)
                 except FileNotFoundError:
                     raise Exception(f'The folder {path_to_original_recording_session} does not have an alignments folder! Please ensure all recording session folders for all speakers have an alignments folder by running forced_alignment_librispeech.py script first.')
@@ -171,15 +179,23 @@ def apply_time_shifting(in_dir, out_dir, alignments_dir, args, save_transcript=F
                 # create overall time stretch BPF to apply on the audio content of this wav file
                 stretch_givenBPF = np.column_stack((time_stamps, stretch_factors))
                 # apply augmentation to the audio file, saving the result to STRETCH_OUTPUTDIR
-                naming_format = shift(filepath, stretch_givenBPF, STRETCH_OUTPUTDIR, transf) #Call shift function for single file time stretching
+                shift(filepath, stretch_givenBPF, STRETCH_OUTPUTDIR, transf) #Call shift function for single file time stretching
                 # save the corresponding transcript in the new folder if required
-                if save_transcript and not args.libritts:
-                    with open(os.path.join(STRETCH_OUTPUTDIR, naming_format+'_tr.txt'), 'w') as f:
+                if args.libritts_transcripts or args.libritts:
+                    naming_format = filepath.split('/')[-1].replace('.wav','')
+                    with open(os.path.join(STRETCH_OUTPUTDIR, naming_format+'.txt'), 'w') as f:
                         f.write(transcript.lower())
             logging.info(f"{STRETCH_OUTPUTDIR} created.")
+            # remove BPF files from folder
+            if not args.save_bpf:
+                [os.remove(os.path.join(STRETCH_OUTPUTDIR,f)) for f in os.listdir(STRETCH_OUTPUTDIR) if "BPF.txt" in f]
+            # copy original Librispeech transcript file into the time stretched dir
+            if not args.libritts_transcripts and not args.libritts:
+                orig_tr = list(filter(lambda filepath: filepath.endswith('.trans.txt'), input_files))[0]
+                shutil.copyfile(orig_tr, os.path.join(STRETCH_OUTPUTDIR, orig_tr.split('/')[-1]))
 
 
-def main(args):
+def main():
     """The result of this script will be a new folder, whose root name is specified by args.out_dir,
     which will have the Librispeech folder structure, containing recording sessions that have Cleese augmentations
     
@@ -192,26 +208,31 @@ def main(args):
     The speaker folders in args.out_dir will have the augmentation type suffixed to their names.
     """
 
-    apply_pitch_shifting(args.in_dir, args.out_dir, args.female_pitch, args.male_pitch)
+    apply_pitch_shifting()
     # use the folder created by pitch shifting as the in_dir folder
     # specify the folder in which to find time alignments as alignments_dir
-    apply_time_shifting(in_dir=args.out_dir, out_dir=args.out_dir, alignments_dir=args.in_dir, args=args, save_transcript=True) 
+    apply_time_shifting() 
     
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run pitch shift and time stretch Cleese augmentations on Librispeech folder. NOTE1: Script is updated with LibriTTS support, but must provide a --libritts flag. NOTE2: Saving original transcript file to output dir does not work for LibriTTS-formatted input dirs.")
+        description="Run pitch shift and time stretch Cleese augmentations on Librispeech/LibriTTS folder. NOTE: Script is updated with LibriTTS support, but must provide a '--libritts' flag.")
     parser.add_argument("--in_dir", type=str, required=True,
-                        help="Path to the root of an existing folder that contains speaker folders (in Librispeech folder structure) to process. The audio files within will be left unaltered. The speaker folders must have gender suffixes. The recording sessions folders must include a wav2vec2 alignments folder.")
+                        help="Path to the root of an existing folder that contains speaker folders (in Librispeech/LibriTTS folder structure) to process. The audio files within will be left unaltered. The speaker folders must have gender suffixes. The recording sessions folders must include a wav2vec2_alignments/ folder.")
     parser.add_argument("--out_dir", type=str, required=True,
-                        help="Path of output dir that will be created with augmented speech. Will be in Librispeech folder structure. Can specify the same one for multiple runs. Will have speaker folders suffixed with augmentation type created.")
+                        help="Path of output dir that will be created with augmented speech. Will be in Librispeech/LibriTTS folder structure. Can specify the same one for multiple runs. Will have speaker folders suffixed with augmentation type created.")
     parser.add_argument("--female_pitch", type=int, required=True,
                         help="The pitch shift factor expressed in cents to apply to all speech samples of female speakers.")
     parser.add_argument("--male_pitch", type=int, required=True,
                         help="The pitch shift factor expressed in cents to apply to all speech samples of male speakers.")
+    parser.add_argument("--libritts_transcripts", default=False, action='store_true',
+                    help="Flag used to specify whether to create separate transcript txt files alongside the augmented audio files, if dataset is originally in Librispeech format. Defaults to False if flag is not provided.")
     parser.add_argument("--libritts", default=False, action='store_true',
-                        help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
+                        help="Flag used to specify whether the dataset is originally in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
+    parser.add_argument("--save_bpf", default=False, action='store_true',
+            help="Flag used to specify whether to save BPF txt files created by CLEESE alongside the augmented audio files. Defaults to False if flag is not provided.")
     # parse command line arguments
+    global args
     args = parser.parse_args()
 
     # setup logging to both console and logfile
@@ -222,7 +243,7 @@ if __name__ == "__main__":
     # log the command that started the script
     logging.info(f"Started script via: {' '.join(sys.argv)}")
 
-    main(args)
+    main()
 
     toc = time.perf_counter()
     logging.info(f"Finished processing in {time.strftime('%H:%M:%Ss', time.gmtime(toc - tic))}")
