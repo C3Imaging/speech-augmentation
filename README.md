@@ -44,12 +44,12 @@ from .cleeseEngine import *
 
 ### Step 1: Selecting Suitable Adult Candidate Speakers
 
-We first run the **Compute_librispeech_cmukids_similarities.py** script on Librispeech train-clean-100 dataset + CMU kids dataset. The output produces a text file listing the adult speakers with a cosine similarity score above a specified threshold.
+We first run the **Compute_librispeech_cmukids_similarities.py** script on Librispeech train-clean-100 dataset + CMU kids dataset. The output results in a new folder that contains copied Librispeech speaker folders with a cosine similarity score above a specified threshold, appended with their gender tag.
 
 ### Step 2: Generate Timestamps for Suitable Adult Speakers' Transcripts
 
-After selecting the suitable adult speakers according to Step 1, we copy the selected speaker folders from Librispeech train-clean-100 to a new folder, so we have a dataset of only the selected speakers. Then we run **forced_alignment_librispeech.py** on that folder. This will populate the new folder with outputted text files with alignments (timestamps) for the words in the transcript files.
+After selecting the suitable adult speakers according to Step 1, we run **forced_alignment_librispeech.py** on the new folder. This will populate the speaker folders with a subfolder that contains text files with time alignments (timestamps for the words in each transcript) for each audio file.
 
 ### Step 3: Generate Augmented Dataset
 
-Using the adult speakers dataset with time alignments as the input, we run **cleese_audio_augmentation.py** to produce an identically structured dataset of augmented speakers. The CLEESE configuration used for augmentation experiments can be found in the file **cleeseConfig_all_lj.py**
+Using the dataset from Step 2, we run **cleese_audio_augmentation.py** to produce a new identically structured dataset of augmented speakers. The CLEESE configuration used for augmentation experiments can be found in the file **cleeseConfig_all_lj.py**
