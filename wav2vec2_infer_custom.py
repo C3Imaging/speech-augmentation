@@ -25,13 +25,16 @@ def main(args):
     # trs_train_ids = [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in trs_train]
     # missing_from_wavs = list(sorted(set(trs_train_ids) - set(wavs_train_ids)))
 
-    assert [f.split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wav_paths] == [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in gt_tr_paths], "number of and order of must be the same for audio and text filenames."
+    # if there are transcript files:
+    if gt_tr_paths:
+        assert [f.split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wav_paths] == [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in gt_tr_paths], "number of and order of must be the same for audio and text filenames."
 
     # create model + decoder pair
 
     # cfg wav2vec2 + beam search decoder with Transformer language model from fairseq
     # asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path)
-    asr = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=args.model_path, vocab_path=args.vocab_path)
+    # asr = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=args.model_path, vocab_path=args.vocab_path)
+    asr = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy()
     # run ASR inference and decode into predicted hypothesis transcripts
     hypos = asr.infer(wav_paths, batch_size=args.batch_size)
     # populate hypothesis.txt
@@ -58,7 +61,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run ASR inference using a wav2vec2 checkpoint file and a dataset of audio files. Saves hypothesis transcripts to a new output folder. If ground truth transcript files exist, compile and save them in one file, so script output files ready to be processed by sclite.")
+        description="Run ASR inference using a wav2vec2 checkpoint file and a dataset of audio files. Saves hypothesis transcripts to a new output folder. If ground truth transcript files exist, compile and save them in one file, so script output files are ready to be processed by sclite to calculate WER stats.")
     parser.add_argument("--in_dir", type=str, required=True,
                         help="Path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files.")
     parser.add_argument("--out_dir", type=str, required=True,
@@ -66,9 +69,9 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, required=True,
                         help="Path of a finetuned wav2vec2 model's .pt file")
     parser.add_argument("--vocab_path", type=str, required=True,
-                        help="Path of the finetuned wav2vec2 model's vocab dict text file used during ASR finetuning")
-    parser.add_argument("--batch_size", type=int,
-                        help="Batch size for minibatches for inference. default 0 = sequential processing")
+                        help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning.")
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="Minibatch size for inference. defaults to 1 (sequential processing)")
 
     # parse command line arguments
     args = parser.parse_args()

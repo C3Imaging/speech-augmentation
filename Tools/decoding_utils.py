@@ -65,6 +65,14 @@ class BaseWav2Vec2Model(ABC):
     def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
         """Runs inference on a batch of audio samples, first preprocessing the audio as required by the model and then returning the emissions matrices."""
 
+    def _preproc(self, filepaths: List[str], target_sr: int = 16000) -> List[torch.Tensor]:
+        # common preprocessing steps for wav files
+        waveforms, sr = decoding_utils_chkpt.get_features_list(filepaths)
+        if sr != target_sr:
+            waveforms = [torchaudio.functional.resample(waveform, sr, target_sr) for waveform in waveforms]
+
+        return waveforms
+
 
 # wav2vec2 ASR models (concrete implementations)
 class TorchaudioWav2Vec2Model(BaseWav2Vec2Model):
@@ -78,11 +86,10 @@ class TorchaudioWav2Vec2Model(BaseWav2Vec2Model):
 
     def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
         """can only perform single audio file inference."""
-        waveform, sr = torchaudio.load(filepaths[0])
-        if sr != self.sample_rate:
-            # torchaudio loads even a single sample as a batch with B=1
-            waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
-        waveform = waveform.to(device)[0]
+        waveforms = self._preproc(filepaths, self.sample_rate)
+        assert len(waveforms) == 1, "ERROR!!! Length of waveforms list should be 1."
+        # unpack single element of list
+        waveform = waveforms[0].to(device)
 
         emissions, _ = self.model(waveform.unsqueeze(0)) # add a batch dimension
 
@@ -114,9 +121,7 @@ class ArgsWav2Vec2Model(BaseWav2Vec2Model):
     def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
         """Inference is not called directly in the fairseq framework API but is done through a decoder, but I copy-pasted the actual inference part from
         fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
-        waveforms, sr = decoding_utils_chkpt.get_features_list(filepaths)
-        if sr != self.sample_rate:
-            waveforms = [torchaudio.functional.resample(waveform, sr, self.sample_rate) for waveform in waveforms]
+        waveforms = self._preproc(filepaths, self.sample_rate)
         padded_features, padding_masks = decoding_utils_chkpt.get_padded_batch_mxs(waveforms)
         padded_features = padded_features.to(device)
 
@@ -166,9 +171,7 @@ class CfgWav2Vec2Model(BaseWav2Vec2Model):
     def forward(self, filepaths: List[str], device: torch.device) -> torch.Tensor:
         """Inference is not called directly in the fairseq framework API but is done through a decoder, but I copy-pasted the actual inference part from
         fairseq/examples/speech_recognition/w2l_decoder.W2lDecoder.generate()"""
-        waveforms, sr = decoding_utils_chkpt.get_features_list(filepaths)
-        if sr != self.sample_rate:
-            waveforms = [torchaudio.functional.resample(waveform, sr, self.sample_rate) for waveform in waveforms]
+        waveforms = self._preproc(filepaths, self.sample_rate)
         padded_features, padding_masks = decoding_utils_chkpt.get_padded_batch_mxs(waveforms)
         padded_features = padded_features.to(device)
 
@@ -413,14 +416,13 @@ class ASR_Decoder_Pair():
         # initialise the transcripts list for all files
         transcripts = []
 
-        if batch_size == 0 or batch_size == 1:
+        if batch_size == 0 or batch_size == 1 or self.model.vocab_path_or_bundle.startswith('torchaudio'):
             # sequential inference
             transcripts = self._infer_sequential(filepaths)
         else:
             # minibatch inference
             assert batch_size <= len(filepaths), "ERROR: batch_size must be less than or equal to the number of audio samples to process for inference."
             for i in tqdm(range(0, len(filepaths), batch_size), total=int(math.ceil(len(filepaths)/batch_size)), unit=" minibatch", desc="Generating transcripts in minibatches, so far"):
-                a = filepaths[i:i+batch_size]
                 emission_mx = self.model.forward(filepaths[i:i+batch_size], self.device)
                 transcripts.append(self.decoder.generate(emission_mx))
 

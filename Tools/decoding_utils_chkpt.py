@@ -25,7 +25,7 @@ def get_config_dict(args):
 
 
 def get_feature(filepath):
-    # preprocess a single audio file for inference
+    # preprocess a single audio file for inference, for test purposes
     def postprocess(feats):
         if feats.dim() == 2:
             feats = feats.mean(-1)
@@ -47,23 +47,16 @@ def get_feature(filepath):
 
 def get_features_list(filepaths):
     """Load and preprocess audio files into a list of 1D audio tensors."""
-    def postprocess(feats):
-        if feats.dim() == 2:
-            feats = feats.mean(-1)
-
-        assert feats.dim() == 1, feats.dim()
-
-        with torch.no_grad():
-            feats = F.layer_norm(feats, feats.shape)
-
-        return feats
-
     inputs = []
     for i in range(len(filepaths)):
         wav, sample_rate = torchaudio.load(filepaths[i])
-        feats = postprocess(wav[0])
-        inputs.append(feats)
+        # convert to monochannel if original wav file is dual channel
+        if wav.size()[0] == 2:
+            wav = torch.mean(wav, dim=0, keepdim=True)
 
+        feats = F.layer_norm(wav[0], wav[0].shape)
+        
+        inputs.append(feats)
 
     return inputs, sample_rate
 
