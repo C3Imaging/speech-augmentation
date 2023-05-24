@@ -3,6 +3,7 @@ import sys
 import csv
 import time
 import logging
+from pydub import AudioSegment
 
 
 class Profiler():
@@ -78,3 +79,84 @@ def get_transcript_from_alignment(path):
     
     return " ".join(transcript)
 
+
+def flac_to_wav(root_path):
+    """in-place conversion of flac files to wav files."""
+    for dirpath, _, filenames in os.walk(root_path, topdown=False):
+            # get list of speech files from a single folder
+            speech_files = []
+            # loop through all files found
+            for filename in filenames:
+                if filename.endswith('.flac'):
+                    speech_files.append(os.path.join(dirpath, filename))
+            # in place conversion
+            if speech_files:
+                for speech_file in speech_files:
+                    audio = AudioSegment.from_file(speech_file, "flac")
+                    audio.export(speech_file.replace("flac", "wav"), format="wav")
+                    os.remove(speech_file)
+
+
+def mp3_to_wav(root_path):
+    """in-place conversion of mp3 files to wav files."""
+    for dirpath, _, filenames in os.walk(root_path, topdown=False):
+            # get list of speech files from a single folder
+            speech_files = []
+            # loop through all files found
+            for filename in filenames:
+                if filename.endswith('.mp3'):
+                    speech_files.append(os.path.join(dirpath, filename))
+            # in place conversion
+            if speech_files:
+                for speech_file in speech_files:
+                    audio = AudioSegment.from_mp3(speech_file)
+                    audio.export(speech_file.replace("mp3", "wav"), format="wav")
+                    os.remove(speech_file)
+
+
+def preprocessing_augmentations(root_path, channels=1, sr=16000, vol=0, in_place=False):
+    """Apply different augmentations to wav audio files in a folder.
+
+    Args:
+      root_path (str):
+        The path to the directory containing the audio files.
+      channels (int):
+        the number of channels the output audio should have.
+      sr (int):
+        the sampling rate the output audio should have.
+      vol (int):
+        the dB attenuation to apply to the original audio.
+      in_place (bool):
+        if True, replace the original audio file with the new version, otherwise save new as a separate file.
+    """
+    for dirpath, _, filenames in os.walk(root_path, topdown=False):
+            # get list of speech files from a single folder
+            speech_files = []
+            # loop through all files found
+            for filename in filenames:
+                if filename.endswith('.wav'):
+                    speech_files.append(os.path.join(dirpath, filename))
+            # the augmentations
+            for speech_file in speech_files:
+                audio = AudioSegment.from_wav(speech_file)
+                assert channels in range(1,3), "ERROR: channels arg should only be set as 1 or 2!"
+                audio = audio.set_channels(channels)
+                audio = audio.set_frame_rate(sr)
+                if vol:
+                    audio = audio + vol # e.g. 15 for volume boost
+                
+                # w1 = wave.open(speech_file)
+                # print("Number of channels is: ",    w1.getnchannels())
+                # print("Sample width in bytes is: ", w1.getsampwidth())
+                # print("Framerate is: ",             w1.getframerate())
+                # print("Number of frames is: ",      w1.getnframes())
+
+                if in_place:
+                    audio.export(speech_file, format="wav")
+                else:
+                    f = speech_file.split(".wav")[0] 
+                    f = f + "__dual" if channels == 2 else f + "__mono"
+                    f = f + f"_{sr}hz"
+                    f = f + f"_plus{vol}db" if vol >= 0 else f + f"_minus{vol}db"
+                    f = f + ".wav"
+                    audio.export(f, format="wav")
