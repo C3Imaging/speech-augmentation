@@ -1,7 +1,10 @@
 import os
 import shlex
+import librosa
 import subprocess
+import numpy as np
 import pandas as pd
+from scipy.io import wavfile
 
 
 def pyannote_diarization(root_path):
@@ -18,15 +21,16 @@ def pyannote_diarization(root_path):
     from pyannote.audio import Pipeline
 
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization@2.1",
-                                        use_auth_token="")
+                                        use_auth_token="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")
 
-    for dirpath, _, filenames in os.walk(root_path, topdown=False):
+    for dirpath, _, filenames in os.walk(root_path, topdown=True):
         # get list of speech files from a single folder
         speech_files = []
         # loop through all files found
         for filename in filenames:
             if filename.endswith('.wav'):
                 speech_files.append(os.path.join(dirpath, filename))
+        break # loop only through files in topmost folder
 
     # create new subfolder for the diarization results
     out_path = os.path.join(root_path, "pyannote-diarization")
@@ -50,9 +54,13 @@ def rttm_to_wav(root_path):
         root_path (str):
             The path to a 'pyannote-diarization/' subfolder, containing subfolders for each audio recording, each containing a 'diarization.rttm' file.
             NOTE: The parent folder of 'pyannote-diarization/' should have the audio recordings wav files.
+
+    Returns:
+      speaker_folders (list, str):
+        paths to speaker folders.
     """
 
-    for dirpath, subdirs, filenames in os.walk(root_path, topdown=True):
+    for dirpath, subdirs, _ in os.walk(root_path, topdown=True):
         for subdir in subdirs:
             # read rttm file into a dataframe
             df = pd.read_csv(os.path.join(dirpath, subdir, "diarization.rttm"), delim_whitespace=True, header=None)
@@ -60,9 +68,11 @@ def rttm_to_wav(root_path):
             df.columns = ["Type", "File ID", "Channel ID", "Turn Onset", "Turn Duration", "Orthography Field", "Speaker Type", "Speaker Name", "Confidence Score", "Signal Lookahead Time"]
             speakers = df["Speaker Name"].unique().tolist() # list of unique speakers
             # create a subfolder for each speaker, where audio snippets will be stored
+            speaker_folders = []
             for speaker in speakers:
                 subfolder = os.path.join(dirpath, subdir, speaker)
                 if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
+                speaker_folders.append(subfolder)
             # initialise a dict with a count of utterances per speaker
             speakers_dict = dict()
             for speaker in speakers:
@@ -75,3 +85,34 @@ def rttm_to_wav(root_path):
                 subprocess.run(shlex.split(f"ffmpeg -ss {start_time} -i {in_audio_path} -t {duration} {out_audio_path}"))
                 speakers_dict[speaker]+=1
         break # loop only over the first level subfolders of root_path, which were created per audio file in the parent folder of root_path.
+
+    return speaker_folders
+
+
+def combine_wavs(folder_path, sr_out=16000):
+    for dirpath, _, filenames in os.walk(folder_path, topdown=True):
+        # get list of speech files from a single folder
+        speech_files = []
+        # loop through all files found
+        for filename in filenames:
+            if filename.endswith('.wav') and "unified" not in filename:
+                speech_files.append(os.path.join(dirpath, filename))
+        speech_files.sort()
+        # append each wav file to a list
+        out_wav = list()
+        for speech_file in speech_files:
+            wav, sr = librosa.load(speech_file, sr=None)
+            if sr != sr_out:
+                wav = librosa.resample(wav, orig_sr=sr, target_sr=sr_out)
+            out_wav.append(wav)
+        break # loop only over the files in the topmost folder
+    # collapse list of wavs into a 1D array
+    out_wav = np.concatenate(out_wav).ravel()
+    wavfile.write(os.path.join(dirpath, "unified.wav"), sr_out, out_wav)
+
+
+            
+
+
+
+
