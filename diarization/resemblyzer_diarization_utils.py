@@ -117,7 +117,8 @@ def get_speaker_segments(similarity_dict, wav_splits, similarity_threshold):
 
 
 def resemblyzer_diarization(root_path, similarity_threshold):
-    """Main function to create Resemblyzer diarization output."""
+    """Main function to create Resemblyzer diarization output.
+    NOTE: 'root_path' dir must contain a 'speaker_samples/' subdir that contains '<speakerID>.wav audio files, one per speaker, from which speaker embeddings will be created."""
 
     speaker_names, speaker_wavs = get_speaker_samples(root_path)
 

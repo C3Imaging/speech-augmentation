@@ -54,10 +54,6 @@ def rttm_to_wav(root_path):
         root_path (str):
             The path to a 'pyannote-diarization/' subfolder, containing subfolders for each audio recording, each containing a 'diarization.rttm' file.
             NOTE: The parent folder of 'pyannote-diarization/' should have the audio recordings wav files.
-
-    Returns:
-      speaker_folders (list, str):
-        paths to speaker folders.
     """
 
     for dirpath, subdirs, _ in os.walk(root_path, topdown=True):
@@ -84,9 +80,10 @@ def rttm_to_wav(root_path):
                 out_audio_path = os.path.join(out_dir, speaker + "_" + str(speakers_dict[speaker]) + ".wav")
                 subprocess.run(shlex.split(f"ffmpeg -ss {start_time} -i {in_audio_path} -t {duration} {out_audio_path}"))
                 speakers_dict[speaker]+=1
+            # create a unified audio file for each speaker
+            for speaker_folder in speaker_folders:
+                combine_wavs(speaker_folder)
         break # loop only over the first level subfolders of root_path, which were created per audio file in the parent folder of root_path.
-
-    return speaker_folders
 
 
 def combine_wavs(folder_path, sr_out=16000):

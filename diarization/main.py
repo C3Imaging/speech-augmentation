@@ -30,11 +30,7 @@ def pyannote_pipeline(root_path):
     utils.mp3_to_wav(root_path)
     utils.preprocessing_augmentations(root_path, in_place=True)
     pyannote_diarization_utils.pyannote_diarization(root_path)
-    speaker_folders = pyannote_diarization_utils.rttm_to_wav(os.path.join(root_path, "pyannote-diarization"))
-    for speaker_folder in speaker_folders:
-        # call for each speaker subfolder
-        pyannote_diarization_utils.combine_wavs(speaker_folder)
-        pyannote_diarization_utils.combine_wavs(speaker_folder)
+    pyannote_diarization_utils.rttm_to_wav(os.path.join(root_path, "pyannote-diarization"))
 
 
 def main(root_path):

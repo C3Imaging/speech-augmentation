@@ -99,19 +99,19 @@ def flac_to_wav(root_path):
 
 def mp3_to_wav(root_path):
     """in-place conversion of mp3 files to wav files."""
-    for dirpath, _, filenames in os.walk(root_path, topdown=False):
-            # get list of speech files from a single folder
-            speech_files = []
-            # loop through all files found
-            for filename in filenames:
-                if filename.endswith('.mp3'):
-                    speech_files.append(os.path.join(dirpath, filename))
-            # in place conversion
-            if speech_files:
-                for speech_file in speech_files:
-                    audio = AudioSegment.from_mp3(speech_file)
-                    audio.export(speech_file.replace("mp3", "wav"), format="wav")
-                    os.remove(speech_file)
+    for dirpath, _, filenames in os.walk(root_path, topdown=True):
+        # get list of speech files from a single folder
+        speech_files = []
+        # loop through all files found
+        for filename in filenames:
+            if filename.endswith('.mp3'):
+                speech_files.append(os.path.join(dirpath, filename))
+        # in place conversion
+        for speech_file in speech_files:
+            audio = AudioSegment.from_mp3(speech_file)
+            audio.export(speech_file.replace("mp3", "wav"), format="wav")
+            os.remove(speech_file)
+        break
 
 
 def preprocessing_augmentations(root_path, channels=1, sr=16000, vol=0, in_place=False):
