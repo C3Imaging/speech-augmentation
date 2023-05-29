@@ -111,11 +111,12 @@ def mp3_to_wav(root_path):
             audio = AudioSegment.from_mp3(speech_file)
             audio.export(speech_file.replace("mp3", "wav"), format="wav")
             os.remove(speech_file)
+            logging.info(f"{speech_file.split('/')[-1].split('.wav')[0]} converted from mp3 to wav.")
         break
 
 
-def preprocessing_augmentations(root_path, channels=1, sr=16000, vol=0, in_place=False):
-    """Apply different augmentations to wav audio files in a folder.
+def audio_preprocessing(root_path, channels=1, sr=16000, vol=0, in_place=False):
+    """Apply different generic audio preprocessing steps to wav audio files in a folder, as described by the function parameters.
 
     Args:
       root_path (str):
@@ -130,29 +131,43 @@ def preprocessing_augmentations(root_path, channels=1, sr=16000, vol=0, in_place
         if True, replace the original audio file with the new version, otherwise save new as a separate file.
     """
     for dirpath, _, filenames in os.walk(root_path, topdown=False):
-            # get list of speech files from a single folder
-            speech_files = []
-            # loop through all files found
-            for filename in filenames:
-                if filename.endswith('.wav'):
-                    speech_files.append(os.path.join(dirpath, filename))
-            # the augmentations
-            for speech_file in speech_files:
-                audio = AudioSegment.from_wav(speech_file)
+        # get list of speech files from a single folder
+        speech_files = []
+        # loop through all files found
+        for filename in filenames:
+            if filename.endswith('.wav'):
+                speech_files.append(os.path.join(dirpath, filename))
+        # the augmentations
+        for speech_file in speech_files:
+            modifications = False # flag to specify whether any modifications have been made to the original audio file.
+            audio = AudioSegment.from_wav(speech_file)
+            if audio.channels != channels:
                 assert channels in range(1,3), "ERROR: channels arg should only be set as 1 or 2!"
                 audio = audio.set_channels(channels)
+                modifications = True
+            if audio.frame_rate != sr:
                 audio = audio.set_frame_rate(sr)
-                if vol:
-                    audio = audio + vol # e.g. 15 for volume boost
-                
-                # w1 = wave.open(speech_file)
-                # print("Number of channels is: ",    w1.getnchannels())
-                # print("Sample width in bytes is: ", w1.getsampwidth())
-                # print("Framerate is: ",             w1.getframerate())
-                # print("Number of frames is: ",      w1.getnframes())
+                modifications = True
+            if vol:
+                audio = audio + vol # e.g. 15 for volume boost
+                modifications = True
+            
+            # w1 = wave.open(speech_file)
+            # print("Number of channels is: ",    w1.getnchannels())
+            # print("Sample width in bytes is: ", w1.getsampwidth())
+            # print("Framerate is: ",             w1.getframerate())
+            # print("Number of frames is: ",      w1.getnframes())
 
+            # from pydub import AudioSegment
+            # song = AudioSegment.from_file(speech_file, format="wav")
+            # song = AudioSegment.from_file("/workspace/datasets/test/yt.m4a")
+            # print(song.frame_rate)
+            # print(song.channels)
+
+            if modifications:
                 if in_place:
                     audio.export(speech_file, format="wav")
+                    logging.info(f"{speech_file} has been modified in place with following modifications: n_channels={channels}, sampling_rate={sr}, volume_boost={vol}.")
                 else:
                     f = speech_file.split(".wav")[0] 
                     f = f + "__dual" if channels == 2 else f + "__mono"
@@ -160,3 +175,4 @@ def preprocessing_augmentations(root_path, channels=1, sr=16000, vol=0, in_place
                     f = f + f"_plus{vol}db" if vol >= 0 else f + f"_minus{vol}db"
                     f = f + ".wav"
                     audio.export(f, format="wav")
+                    logging.info(f"Modified version of {speech_file} saved as {f}.")

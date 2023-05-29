@@ -1,5 +1,6 @@
 import os
 import librosa
+import logging
 import numpy as np
 from scipy.io.wavfile import write
 from resemblyzer import preprocess_wav, VoiceEncoder
@@ -24,19 +25,28 @@ def get_speaker_samples(root_path):
         wav data per speaker.
     """
     # load example speech for speakers, from which speaker embeddings will be created
+    speaker_samples_dir = os.path.join(root_path, "speaker_samples")
+    assert os.path.exists(speaker_samples_dir), f"ERROR: {speaker_samples_dir} does not exist!!! Please manually create it."
+
     speaker_names = []
     speaker_wavs = []
-    for dirpath, _, filenames in os.walk(os.path.join(root_path, "speaker_samples"), topdown=True):
+    for dirpath, _, filenames in os.walk(speaker_samples_dir, topdown=True):
+        # get list of speech files from a single folder
+        speech_files = []
         # loop through all files found
         for filename in filenames:
             if filename.endswith('.wav'):
-                # sr, wav = wavfile.read(os.path.join(dirpath, filename))
-                wav, sr = librosa.load(os.path.join(dirpath, filename), sr=None)
-                if sr != SAMPLING_RATE:
-                    wav = librosa.resample(wav, orig_sr=sr, target_sr=SAMPLING_RATE)
-                speaker_wavs.append(wav)
-                speaker_names.append(filename.split(".wav")[0])
-        break
+                speech_files.append(os.path.join(dirpath, filename))
+        break # loop only through files in topmost folder
+    # loop through all files found
+    assert len(speech_files), f"ERROR: no wav files found in {speaker_samples_dir}!!! Please manually add example speech wav files for each speaker."
+    for speech_file in speech_files:
+        # sr, wav = wavfile.read(os.path.join(dirpath, speech_file))
+        wav, sr = librosa.load(os.path.join(dirpath, speech_file), sr=None)
+        if sr != SAMPLING_RATE:
+            wav = librosa.resample(wav, orig_sr=sr, target_sr=SAMPLING_RATE)
+        speaker_wavs.append(wav)
+        speaker_names.append(speech_file.split(".wav")[0])
     return speaker_names, speaker_wavs
 
 
@@ -109,10 +119,7 @@ def get_speaker_segments(similarity_dict, wav_splits, similarity_threshold):
         similarities = [s[i] for s in similarity_dict.values()]
         best = np.argmax(similarities)
         name, similarity = list(similarity_dict.keys())[best], similarities[best]
-        if similarity > similarity_threshold:
-            speaker_segments.append(name)
-        else:
-            speaker_segments.append('none')
+        speaker_segments.append(name) if similarity > similarity_threshold else speaker_segments.append('none')
     return speaker_segments
 
 
@@ -149,8 +156,9 @@ def resemblyzer_diarization(root_path, similarity_threshold):
         # create a separate subfolder for the diarization results for each audio file
         subfolder = os.path.join(out_path, speech_file.split("/")[-1].split(".wav")[0])
         if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
+        logging.info(f"Populating {subfolder} with diarization wavs.")
 
-		# preprocesses audio into 16kHz mono-channel, removes long silences, normalises audio volume
+        # preprocesses audio into 16kHz mono-channel, removes long silences, normalises audio volume
         wav = preprocess_wav(speech_file)
 
         wav, similarity_dict, wav_splits = get_predictions(wav, speaker_names, speaker_wavs)
@@ -169,5 +177,11 @@ def resemblyzer_diarization(root_path, similarity_threshold):
                 speakers_frames_idxs_dict[speaker].append(np.arange(seg.start,seg.stop))
         # collapse each speaker's lists into a 1D array of sorted unique frame indexes and write the corresponding audio frames to separate speaker files.
         for k, v in speakers_frames_idxs_dict.items():
-            speakers_frames_idxs_dict[k] = np.unique(np.concatenate(v).ravel())
-            write(os.path.join(subfolder, f"{k}_unified_confthresh_{str(similarity_threshold)}.wav"), SAMPLING_RATE, wav[speakers_frames_idxs_dict[k].tolist()])
+            if v:
+                speakers_frames_idxs_dict[k] = np.unique(np.concatenate(v).ravel())
+                write(os.path.join(subfolder, f"{k}_unified_confthresh_{str(similarity_threshold)}.wav"), SAMPLING_RATE, wav[speakers_frames_idxs_dict[k].tolist()])
+                logging.info(f"{os.path.join(subfolder, f'{k}_unified_confthresh_{str(similarity_threshold)}.wav')} created.")
+            else:
+                logging.info(f"{subfolder} has no diarized audio for speaker {k}.")
+        logging.info(f"Population of {subfolder} with diarization wavs complete.")
+

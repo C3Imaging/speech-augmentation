@@ -120,9 +120,6 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
                         i+=1
 
 
-
-
-
 def run_inference():
     """Runs wav2vec2 model on a folder specified as the positional argument of this script.
 
@@ -184,6 +181,7 @@ if __name__ == "__main__":
                         help="Flag used to specify whether detected words are saved as audio snippets. Defaults to False if flag is not provided.")
     parser.add_argument("--libritts", default=False, action='store_true',
                         help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
+    
     # parse command line arguments
     global args
     args = parser.parse_args()
