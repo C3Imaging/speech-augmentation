@@ -53,3 +53,20 @@ After selecting the suitable adult speakers according to Step 1, we run **forced
 ### Step 3: Generate Augmented Dataset
 
 Using the dataset from Step 2, we run **cleese_audio_augmentation.py** to produce a new identically structured dataset of augmented speakers. The CLEESE configuration used for augmentation experiments can be found in the file **cleeseConfig_all_lj.py**
+
+# Other Important Scripts for your convenience
+
+## ASR Inference
+Current ASR models available:
+- wav2vec2 (fairseq framework): You can run `wav2vec2_infer_custom.py` (run `python wav2vec2_infer_custom.py --help` for a description) to generate hypothesis text transcripts from an audio dataset.
+<br />
+Future ASR models to be integrated:<br />
+- Conformer-Transducer (NeMo framework)
+
+## Speaker Diarization
+
+Current Speaker Diarization models available:
+- Pyannote
+- Resemblyzer
+<br />
+Both can be accessed using `diarization/main.py` (run `python diarization/main.py --help` for a description)
