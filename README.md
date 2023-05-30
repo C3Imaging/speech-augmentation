@@ -60,6 +60,12 @@ Using the dataset from Step 2, we run **cleese_audio_augmentation.py** to produc
 Current ASR models available:
 - wav2vec2 (fairseq framework): You can run `wav2vec2_infer_custom.py` (run `python wav2vec2_infer_custom.py --help` for a description of the usage) to generate hypothesis text transcripts from an audio dataset.
 <br />
+**NOTE:** You must manually specify the ASR pipeline you want to use in the code under the comment `# create model + decoder pair`. There are a number of possible combinations of ASR model (wav2vec2 that has args field or cfg field) + Decoder [+ LM] to choose from. You must also manually edit the file `Tools/decoding_utils.py` with paths local to you in the following places:<br />
+- BeamSearchKenLMDecoder_Fairseq -> __init__ -> kenlm_model
+- BeamSearchKenLMDecoder_Fairseq -> __init__ -> lexicon
+- TransformerDecoder -> __init__ -> transformerLM_root_folder
+- TransformerDecoder -> __init__ -> lexicon
+<br /><br />
 Future ASR models to be integrated:<br />
 - Conformer-Transducer (NeMo framework)
 
