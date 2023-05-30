@@ -37,6 +37,10 @@ def main(args):
     asr = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy()
     # run ASR inference and decode into predicted hypothesis transcripts
     hypos = asr.infer(wav_paths, batch_size=args.batch_size)
+
+    # create output dir if it doesnt exist.
+    if not os.path.exists(args.out_dir): os.makedirs(args.out_dir, exist_ok=True)
+    
     # populate hypothesis.txt
     with open(os.path.join(args.out_dir, "hypothesis.txt"), 'w') as hyp_file:
         for hyp, wav_path in zip(hypos, wav_paths):

@@ -51,6 +51,7 @@ def pyannote_diarization(root_path, num_speakers=0, resemblyzer_preprocessing=Fa
         logging.info("Resemblyzer-style audio preprocessing activated for Pyannote diarization pipeline.")
 
     for speech_file in speech_files:
+        # apply the pipeline to an audio file (input can only be filepath, not ndarray)
         if resemblyzer_preprocessing:
             wav = preprocess_wav(speech_file)
             wav_filename = speech_file.split('/')[-1]
@@ -58,7 +59,6 @@ def pyannote_diarization(root_path, num_speakers=0, resemblyzer_preprocessing=Fa
             write(os.path.join(resemblyzer_preproc_path, wav_filename), 16000, wav)
             diarization = pipeline(os.path.join(resemblyzer_preproc_path, wav_filename), num_speakers=num_speakers) if num_speakers else pipeline(os.path.join(resemblyzer_preproc_path, wav_filename))
         else:
-            # apply the pipeline to an audio file (input can only be filepath, not ndarray)
             diarization = pipeline(speech_file, num_speakers=num_speakers) if num_speakers else pipeline(speech_file)
         # create a separate subfolder for the diarization results for each audio file
         subfolder = os.path.join(out_path, speech_file.split("/")[-1].split(".wav")[0])

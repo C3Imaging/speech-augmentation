@@ -18,18 +18,20 @@ def pyannote_pipeline(root_path, num_speakers, resemblyzer_preprocessing=False):
     logging.info("Pyannote diarization complete.")
 
 
-def resemblyzer_pipeline(root_path):
+def resemblyzer_pipeline(root_path, similarity_threshold, global_speaker_embeds):
     logging.info("Beginning Resemblyzer diarization.")
-    resemblyzer_diarization_utils.resemblyzer_diarization(root_path, similarity_threshold=0.7)
+    resemblyzer_diarization_utils.resemblyzer_diarization(root_path, similarity_threshold=similarity_threshold, global_speaker_embeds=global_speaker_embeds)
     logging.info("Resemblyzer diarization complete.")
 
 
-def main():
-    global root_path, diarizers, num_speakers, resemblyzer_preprocessing
+def main(args):
+    diarizers = args.diarizers
+    if type(diarizers) != list:
+        diarizers = [diarizers]
     if "pyannote" in diarizers:
-        pyannote_pipeline(root_path, num_speakers, resemblyzer_preprocessing=resemblyzer_preprocessing)
+        pyannote_pipeline(args.folder, args.num_speakers, resemblyzer_preprocessing=args.resemblyzer_preprocessing)
     if "resemblyzer" in diarizers:
-        resemblyzer_pipeline(root_path)
+        resemblyzer_pipeline(args.folder, args.similarity_threshold, args.global_speaker_embeds)
 
 
 if __name__ == "__main__":
@@ -43,18 +45,15 @@ if __name__ == "__main__":
                         help="Specifies the number of speakers, if known in advance. Used explicitly by Pyannote, otherwise number of speakers will be determined automatically.")
     parser.add_argument("--resemblyzer_preprocessing", default=False, action='store_true',
                         help="Flag used to specify whether to preprocess audio files in Resemblyzer style when using the Pyannote diarizer. Defaults to False if flag is not provided.")
+    parser.add_argument("--similarity_threshold", type=float, default=0.7,
+                        help="Specifies the speaker embedding similarity confidence threshold for Resemblyzer to use. Defaults to 0.7 if not provided.")
+    parser.add_argument("--global_speaker_embeds", default=False, action='store_true',
+                        help="Flag used to specify if using the same speaker embeddings for all wav files. Defaults to False if flag is not specified.")
     # parse command line arguments
-    global args
     args = parser.parse_args()
-    root_path = args.folder
-    diarizers = args.diarizers
-    if type(diarizers) != list:
-        diarizers = [diarizers]
-    num_speakers = args.num_speakers
-    resemblyzer_preprocessing = args.resemblyzer_preprocessing
     # root_path = "/workspace/datasets/Wearable_Audio_test"
 
 
     # setup logging to both console and logfile
-    utils.setup_logging(root_path, 'diarization.log', console=True, filemode='a')
-    main()
+    utils.setup_logging(args.folder, 'diarization.log', console=True, filemode='a')
+    main(args)
