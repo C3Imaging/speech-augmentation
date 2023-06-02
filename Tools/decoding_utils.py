@@ -4,6 +4,7 @@ import re
 import os
 import math
 import torch
+import logging
 import fileinput
 import torchaudio
 from tqdm import tqdm
@@ -315,7 +316,7 @@ class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
         target_dict = Dictionary.load(vocab_path_or_bundle)
         # specify non-default decoder arguments as a dict that is then converted to a Namespace object
         decoder_args = {
-            'kenlm_model': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lm_librispeech_kenlm_word_4g_200kvocab.bin", # path to KenLM binary, found at https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
+            'kenlm_model': "/workspace/projects/Alignment/speech-augmentation/Models/language_models/lm_librispeech_kenlm_word_4g_200kvocab.bin", # path to KenLM binary, found at https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
             # used for both lexicon-based and lexicon-free beam search decoders
             'nbest': 1, # number of best hypotheses to keep, a property of parent class (W2lDecoder)
             
@@ -326,7 +327,7 @@ class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
             'lm_weight': 2.0, # how much the LM scores affect the hypotheses' scores
             'sil_weight': 0.0, # the silence token's weight
             # lexicon-based specific
-            'lexicon': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
+            'lexicon': "/workspace/projects/Alignment/speech-augmentation/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
             'word_score': -1.0,
             'unk_weight': float('-inf'), # the unknown token's weight
         }
@@ -355,7 +356,7 @@ class TransformerDecoder(BaseDecoder):
             # This is the freq table of words used to train the LM (usually trained on Librispeech). 
             # Download the TransformerLM dict file (called 'lm_librispeech_word_transformer.dict') from the same link as above and rename it to 'dict.txt'.
             # Make sure all characters are upper cased!
-            transformerLM_root_folder = "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/transformer_lm"
+            transformerLM_root_folder = "/workspace/projects/Alignment/speech-augmentation/Models/language_models/transformer_lm"
             convert_to_upper(os.path.join(transformerLM_root_folder, 'dict.txt'))
             # specify non-default decoder arguments as a dict that is then converted to a Namespace object
             decoder_args = {
@@ -367,7 +368,7 @@ class TransformerDecoder(BaseDecoder):
                 'lm_weight': 2.0,
                 'sil_weight': 0.0, # the silence token's weight
                 # lexicon-based specific
-                'lexicon': "/workspace/projects/Alignment/wav2vec2_alignment/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
+                'lexicon': "/workspace/projects/Alignment/speech-augmentation/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
                 'word_score': -1.0,
                 'unk_weight': float('-inf'), # the unknown token's weight
             }
@@ -398,12 +399,11 @@ class ASR_Decoder_Pair():
 
         transcripts = []
         for filepath in tqdm(filepaths, total=len(filepaths), unit=" transcript", desc="Generating transcripts predictions sequentially, so far"):
+            logging.info(f"Generating transcript for {filepath}")
             emission_mx = self.model.forward([filepath], self.device)
             transcript = self.decoder.generate(emission_mx)[0]
             transcripts.append(transcript)
-        
-        # for transcript in transcripts:
-        #     print(transcript)
+            logging.info(f"Transcript for {filepath} generated.")
 
         return transcripts
 
@@ -423,8 +423,10 @@ class ASR_Decoder_Pair():
             # minibatch inference
             assert batch_size <= len(filepaths), "ERROR: batch_size must be less than or equal to the number of audio samples to process for inference."
             for i in tqdm(range(0, len(filepaths), batch_size), total=int(math.ceil(len(filepaths)/batch_size)), unit=" minibatch", desc="Generating transcripts in minibatches, so far"):
+                logging.info(f"Generating transcripts for batch of wavs of size {batch_size}")
                 emission_mx = self.model.forward(filepaths[i:i+batch_size], self.device)
                 transcripts.append(self.decoder.generate(emission_mx))
+                logging.info(f"Transcripts for batch generated.")
 
             # flatten the minibatch lists
             transcripts = [transcript for minilist in transcripts for transcript in minilist]
@@ -535,11 +537,11 @@ def main() -> None:
     # model configs
     bundle_str = "torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H"
     # wav2vec2 models checkpoints that were trained in the fairseq framework
-    args_model_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/w2v_fairseq/wav2vec2_vox_960h_new.pt"
-    cfg_model_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/vox_55h/checkpoints/checkpoint_best.pt"
+    args_model_filepath = "/workspace/projects/Alignment/speech-augmentation/Models/w2v_fairseq/wav2vec2_vox_960h_new.pt"
+    cfg_model_filepath = "/workspace/projects/Alignment/speech-augmentation/Models/vox_55h/checkpoints/checkpoint_best.pt"
     # vocab dicts used during the training of the corresponding wav2vec2 models trained in the fairseq framework
-    args_vocab_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/w2v_fairseq/dict.ltr.txt"
-    cfg_vocab_filepath = "/workspace/projects/Alignment/wav2vec2_alignment/Models/vox_55h/dict.ltr.txt"
+    args_vocab_filepath = "/workspace/projects/Alignment/speech-augmentation/Models/w2v_fairseq/dict.ltr.txt"
+    cfg_vocab_filepath = "/workspace/projects/Alignment/speech-augmentation/Models/vox_55h/dict.ltr.txt"
     # audio samples to test inference on
     wavpaths = ["/workspace/datasets/myst_test/myst_999465_2009-17-12_00-00-00_MS_4.2_024.wav",
                 "/workspace/datasets/myst_test/myst_002030_2014-02-28_09-37-51_LS_1.1_006.wav",
