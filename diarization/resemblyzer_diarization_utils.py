@@ -2,6 +2,7 @@ import os
 import librosa
 import logging
 import numpy as np
+from tqdm import tqdm
 from scipy.io.wavfile import write
 from resemblyzer import preprocess_wav, VoiceEncoder
 
@@ -39,11 +40,10 @@ def create_speaker_wavs(wav_path, speaker_names, start_stop_times):
 
 def get_speaker_samples(root_path):
     """Returns example wav per speaker from which speaker embeddings will be made by Voice Encoder model.
-    NOTE: must manually populate 'root_path' dir with '<speakerID>.wav' audio files that contain example speech per speaker, from which speaker embeddings will be created. This can be created with the 'diarization/create_speaker_wavs.py' script.
 
     Args:
       root_path (str):
-        The path to a folder contianing wav audio files and a 'speaker_samples/' subdir.
+        The path to a folder contianing wav audio files and a 'speaker-samples/' subdir.
     
     Returns:
       speaker_names (list, str):
@@ -106,7 +106,7 @@ def get_predictions(encoder, wav, speaker_names, speaker_embeds):
     # demonstration. 
     # We'll exceptionally force to run this on CPU, because it uses a lot of RAM and most GPUs 
     # won't have enough. There's a speed drawback, but it remains reasonable.
-    logging.info(f"Creating embedding for entire wav file.")
+    logging.info(f"Resemblyzer diarization: Creating embedding for entire wav file.")
     # dividing wav into segments of multiple frames every 0.0625 seconds.
     # each segment will have an embedding of length 256 (same length as speaker embeddings).
     _, cont_embeds, wav_splits = encoder.embed_utterance(wav, return_partials=True, rate=16)
@@ -151,7 +151,9 @@ def get_speaker_segments(similarity_dict, wav_splits, similarity_threshold):
 
 def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_embeds=False):
     """Main function to create Resemblyzer diarization output.
-    NOTE: 'root_path' dir must contain a 'global-speaker-samples/' subdir that contains '<speakerID>.wav audio files, one per speaker, from which speaker embeddings will be created IF global_speaker_embeds=True. Otherwise, """
+    NOTE: if global_speaker_embeds=True, 'root_path' dir must contain a 'speaker-samples/global-speaker-samples/' subdir that contains '<speakerID>.wav audio files, one per speaker, from which speaker embeddings will be created.
+     Otherwise, 'root_path' must contain a 'speaker-samples/' subdir that in turn contains a folder for each wav file (same name), which has example speech for each speaker in the audio file in the form <speaker_name>.wav
+    """
 
     encoder = VoiceEncoder("cpu")
 
@@ -159,7 +161,7 @@ def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_
         speaker_names, speaker_wavs = get_speaker_samples(os.path.join(root_path, "speaker-samples", "global-speaker-samples"))
         # Get speaker embeddings
         speaker_embeds = [encoder.embed_utterance(speaker_wav) for speaker_wav in speaker_wavs]
-        logging.info("Global speaker embeddings created.")
+        logging.info("Resemblyzer diarization: Global speaker embeddings created.")
 
     for dirpath, _, filenames in os.walk(root_path, topdown=True):
         # get list of speech files from a single folder
@@ -175,12 +177,12 @@ def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_
     if not os.path.exists(out_path): os.makedirs(out_path, exist_ok=True)
 
     # main loop
-    for speech_file in speech_files:
+    for speech_file in tqdm(speech_files, total=len(speech_files), unit=" audio files", desc=f"Resemblyzer diarization: processing audio files in {dirpath}, so far"):
         # apply the pipeline to an audio file
         # create a separate subfolder for the diarization results for each audio file
         subfolder = os.path.join(out_path, speech_file.split("/")[-1].split(".wav")[0])
         if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
-        logging.info(f"Populating {subfolder} with diarization wavs based on {speech_file}.")
+        logging.info(f"Resemblyzer diarization: Populating {subfolder} with diarization wavs based on {speech_file}.")
 
         # preprocesses audio into 16kHz mono-channel, removes long silences, normalises audio volume
         wav = preprocess_wav(speech_file)
@@ -212,8 +214,8 @@ def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_
                 speakers_frames_idxs_dict[k] = np.unique(np.concatenate(v).ravel())
                 out_wav = os.path.join(subfolder, f"{k}_unified_confthresh_{str(similarity_threshold)}.wav")
                 write(out_wav, SAMPLING_RATE, wav[speakers_frames_idxs_dict[k].tolist()])
-                logging.info(f"{out_wav} created.")
+                logging.info(f"Resemblyzer diarization: {out_wav} created.")
             else:
-                logging.info(f"{subfolder} has no diarized audio for speaker {k}.")
-        logging.info(f"Population of {subfolder} with diarization wavs complete.")
+                logging.info(f"Resemblyzer diarization: {subfolder} has no diarized audio for speaker {k}.")
+        logging.info(f"Resemblyzer diarization: Population of {subfolder} with diarization wavs complete.")
 

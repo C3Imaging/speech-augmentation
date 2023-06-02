@@ -9,5 +9,6 @@ infer_outputs/
 test*.py
 temp*.py
 .hypothesis/
-
+diarization/nemo_config/
+diarization/nemo_outputs/
 

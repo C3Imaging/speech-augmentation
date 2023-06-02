@@ -5,18 +5,19 @@ import logging
 import subprocess
 import numpy as np
 import pandas as pd
+import tqdm as tqdm
 from scipy.io import wavfile
 from resemblyzer import preprocess_wav
 from scipy.io.wavfile import write
 
 
-def pyannote_diarization(root_path, num_speakers=0, resemblyzer_preprocessing=False):
+def pyannote_diarization(root_path, num_speakers=None, resemblyzer_preprocessing=False):
     """Create RTTM files using pyannote speaker diarization model.
     Args:
         root_path (str):
             the path to a folder containing wav audio files.
         num_speakers (int):
-            if the number of speakers is explicitly known in advance, otherwise=0 (falsy) then number of speakers will be automatically determined by Pyannote.
+            if the number of speakers is explicitly known in advance, otherwise=None (falsy) then number of speakers will be automatically determined by Pyannote.
         resemblyzer_preprocessing (bool):
             whether to preprocess wav in the same way Resemblyzer does, for an apples-to-apples comparison of the diarization output of Pyannote vs Resemblzyer (same preprocessing steps).
     """
@@ -48,9 +49,9 @@ def pyannote_diarization(root_path, num_speakers=0, resemblyzer_preprocessing=Fa
     if resemblyzer_preprocessing:
         resemblyzer_preproc_path = os.path.join(out_path, 'resemblyzer_preproc_audio')
         if not os.path.exists(resemblyzer_preproc_path): os.makedirs(resemblyzer_preproc_path, exist_ok=True)
-        logging.info("Resemblyzer-style audio preprocessing activated for Pyannote diarization pipeline.")
+        logging.info("Pyannote diarization: Resemblyzer-style audio preprocessing activated for Pyannote diarization pipeline.")
 
-    for speech_file in speech_files:
+    for speech_file in tqdm(speech_files, total=len(speech_files), unit=" audio files", desc=f"Pyannote diarization: processing audio files in {dirpath}, so far"):
         # apply the pipeline to an audio file (input can only be filepath, not ndarray)
         if resemblyzer_preprocessing:
             wav = preprocess_wav(speech_file)
@@ -66,56 +67,52 @@ def pyannote_diarization(root_path, num_speakers=0, resemblyzer_preprocessing=Fa
         # dump the diarization output to disk using RTTM format
         with open(os.path.join(subfolder, "diarization.rttm"), "w") as rttm:
             diarization.write_rttm(rttm)
-            logging.info(f'RTTM file {os.path.join(subfolder, "diarization.rttm")} created.')
+            logging.info(f'Pyannote diarization: RTTM file {os.path.join(subfolder, "diarization.rttm")} created.')
 
 
-def rttm_to_wav(root_path, resemblyzer_preprocessing=False):
+def rttm_to_wav(rttm_path, wav_path, sr_out=16000, rem_files=False):
     """Segment a wav audio file according to the speakers in an RTTM file for that audio file.
 
     Args:
-        root_path (str):
-            the path to a 'pyannote-diarization/' subfolder, containing subfolders for each audio recording, each containing a 'diarization.rttm' file.
-            NOTE: The parent folder of 'pyannote-diarization/' should have the audio recordings wav files.
-        resemblyzer_preprocessing (bool):
-            set to True if used Resemblyzer-style preprocessed audio for the saved diarized audio segments (RTTM file).
+        rttm_path (str):
+            path to a RTTM file.
+        wav_path (str):
+            path to the multispeaker wav file to segment.
+        sr_out (int):
+            output sampling rate for created speaker segments audio files.
+        rem_files (bool):
+            if True, will remove the intermediate speaker segments audio files, keeping only the unified audio file per speaker.
     """
-
-    for dirpath, subdirs, _ in os.walk(root_path, topdown=True):
-        for subdir in subdirs:
-            # loop only over the subfolders that represent audio files.
-            if 'resemblyzer_preproc_audio' not in subdir: # loop only over speaker subdirs.
-                logging.info(f"Processing RTTM file in {subdir}.")
-                # read rttm file into a dataframe.
-                df = pd.read_csv(os.path.join(dirpath, subdir, "diarization.rttm"), delim_whitespace=True, header=None)
-                # manually add header fields according to description in: https://github.com/nryant/dscore#rttm
-                df.columns = ["Type", "File ID", "Channel ID", "Turn Onset", "Turn Duration", "Orthography Field", "Speaker Type", "Speaker Name", "Confidence Score", "Signal Lookahead Time"]
-                speakers = df["Speaker Name"].unique().tolist() # list of unique speakers.
-                # create a subfolder for each speaker, where audio snippets will be stored.
-                speaker_folders = []
-                for speaker in speakers:
-                    subfolder = os.path.join(dirpath, subdir, speaker)
-                    if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
-                    speaker_folders.append(subfolder)
-                # initialise a dict with a count of utterances per speaker.
-                speakers_dict = dict()
-                for speaker in speakers:
-                    speakers_dict[speaker] = 0
-                # loop through rows in df.
-                for start_time, duration, speaker in zip(df["Turn Onset"], df["Turn Duration"], df["Speaker Name"]):
-                    in_audio_path = os.path.join(dirpath, "resemblyzer_preproc_audio", subdir + ".wav") if resemblyzer_preprocessing else os.path.join("/".join(dirpath.split("/")[:-1]), subdir + ".wav")
-                    out_dir = os.path.join(dirpath, subdir, speaker)
-                    out_audio_path = os.path.join(out_dir, speaker + "_" + str(speakers_dict[speaker]) + ".wav")
-                    subprocess.run(shlex.split(f"ffmpeg -ss {start_time} -i {in_audio_path} -t {duration} {out_audio_path}"))
-                    logging.info(f"{out_audio_path} created.")
-                    speakers_dict[speaker]+=1
-                # create a unified audio file for each speaker.
-                for speaker_folder in speaker_folders:
-                    combine_wavs(speaker_folder)
-                logging.info(f"Processing of RTTM file in {subdir} complete.")
-        break # loop only over the first level subfolders of root_path, which were created per audio file in the parent folder of root_path.
+    logging.info(f"Processing RTTM file {rttm_path} to split {wav_path} into seperate speaker files.")
+    # read rttm file into a dataframe.
+    df = pd.read_csv(rttm_path, delim_whitespace=True, header=None)
+    # manually add header fields according to description in: https://github.com/nryant/dscore#rttm
+    df.columns = ["Type", "File ID", "Channel ID", "Turn Onset", "Turn Duration", "Orthography Field", "Speaker Type", "Speaker Name", "Confidence Score", "Signal Lookahead Time"]
+    speakers = df["Speaker Name"].unique().tolist() # list of unique speakers.
+    # create a subfolder for each speaker, where audio snippets will be stored.
+    speaker_folders = []
+    for speaker in speakers:
+        subfolder = os.path.join('/'.join(rttm_path.split('/')[:-1]), speaker)
+        if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
+        speaker_folders.append(subfolder)
+    # initialise a dict with a count of utterances per speaker.
+    speakers_dict = dict()
+    for speaker in speakers:
+        speakers_dict[speaker] = 0
+    # loop through rows in df.
+    for start_time, duration, speaker in zip(df["Turn Onset"], df["Turn Duration"], df["Speaker Name"]):
+        out_dir = os.path.join('/'.join(rttm_path.split('/')[:-1]), speaker)
+        out_audio_path = os.path.join(out_dir, speaker + "_" + str(speakers_dict[speaker]) + ".wav")
+        subprocess.run(shlex.split(f"ffmpeg -y -ss {start_time} -i {wav_path} -t {duration} {out_audio_path}"))
+        logging.info(f"{out_audio_path} created.")
+        speakers_dict[speaker]+=1
+    # create a unified audio file for each speaker.
+    for speaker_folder in speaker_folders:
+        combine_wavs(speaker_folder)
+    logging.info(f"Processing of RTTM file {rttm_path} complete.")
 
 
-def combine_wavs(folder_path, sr_out=16000):
+def combine_wavs(folder_path, sr_out=16000, rem_files=False):
     logging.info(f"Combining wav files in {folder_path} into a single unified wav file.")
     for dirpath, _, filenames in os.walk(folder_path, topdown=True):
         # get list of speech files from a single folder
@@ -136,6 +133,10 @@ def combine_wavs(folder_path, sr_out=16000):
     # collapse list of wavs into a 1D array
     out_wav = np.concatenate(out_wav).ravel()
     wavfile.write(os.path.join(dirpath, "unified.wav"), sr_out, out_wav)
+
+    if rem_files:
+        [os.remove(speech_file) for speech_file in speech_files]
+    
     logging.info(f"Combining wav files in {folder_path} complete.")
 
 

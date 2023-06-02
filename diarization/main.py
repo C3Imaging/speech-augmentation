@@ -7,6 +7,7 @@ import argparse
 from Tools import utils
 import pyannote_diarization_utils
 import resemblyzer_diarization_utils
+import nemo_diarization_utils
 
 
 def pyannote_pipeline(root_path, num_speakers, resemblyzer_preprocessing=False):
@@ -14,7 +15,17 @@ def pyannote_pipeline(root_path, num_speakers, resemblyzer_preprocessing=False):
     utils.mp3_to_wav(root_path)
     utils.audio_preprocessing(root_path, in_place=True)
     pyannote_diarization_utils.pyannote_diarization(root_path, num_speakers=num_speakers, resemblyzer_preprocessing=resemblyzer_preprocessing)
-    pyannote_diarization_utils.rttm_to_wav(os.path.join(root_path, "pyannote-diarization"), resemblyzer_preprocessing=resemblyzer_preprocessing)
+    # 'pyannote-diarization/' subfolder contains subfolders for each audio recording, each in turn containing a 'diarization.rttm' file.
+    # The parent folder of 'pyannote-diarization/' (i.e. root_path) should have the audio recordings wav files.
+    for dirpath, subdirs, _ in os.walk(os.path.join(root_path, "pyannote-diarization"), topdown=True):
+        for subdir in subdirs:
+            # loop only over the subfolders that represent audio files.
+            rttm = [f for f in os.listdir(os.path.join(dirpath, subdir)) if f.endswith("rttm")]
+            if rttm:
+                assert len(rttm) == 1, f"ERROR: there should only be one RTTM file in {os.path.join(dirpath, subdir)}!!!"
+                wav_path = os.path.join(dirpath, "resemblyzer_preproc_audio", subdir + ".wav") if resemblyzer_preprocessing else os.path.join("/".join(dirpath.split("/")[:-1]), subdir + ".wav")
+                pyannote_diarization_utils.rttm_to_wav(os.path.join(dirpath, subdir, rttm[0]), wav_path)
+        break # loop only over the first level of subdirs (where the audio file folders reside).
     logging.info("Pyannote diarization complete.")
 
 
@@ -22,6 +33,13 @@ def resemblyzer_pipeline(root_path, similarity_threshold, global_speaker_embeds)
     logging.info("Beginning Resemblyzer diarization.")
     resemblyzer_diarization_utils.resemblyzer_diarization(root_path, similarity_threshold=similarity_threshold, global_speaker_embeds=global_speaker_embeds)
     logging.info("Resemblyzer diarization complete.")
+
+
+def nemo_pipeline(root_path, num_speakers):
+    logging.info("Beginning NeMo diarization.")
+    nd = nemo_diarization_utils.NemoDiarizer(root_path)
+    nd.nemo_diarization(num_speakers=num_speakers)
+    logging.info("NeMo diarization complete.")
 
 
 def main(args):
@@ -32,6 +50,8 @@ def main(args):
         pyannote_pipeline(args.folder, args.num_speakers, resemblyzer_preprocessing=args.resemblyzer_preprocessing)
     if "resemblyzer" in diarizers:
         resemblyzer_pipeline(args.folder, args.similarity_threshold, args.global_speaker_embeds)
+    if "nemo" in diarizers:
+        nemo_pipeline(args.folder, args.num_speakers)
 
 
 if __name__ == "__main__":
@@ -39,10 +59,10 @@ if __name__ == "__main__":
         description="Splits audio files in a folder into speaker-specific diarized audio snippets.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
                         help="Path to a folder containing audio files. Defaults to CWD if not provided.")
-    parser.add_argument("--diarizers", type=str, choices=["pyannote", "resemblyzer"], nargs='+', default="pyannote",
-                        help="Specifies which diarizer model to use.\nIf 'pyannote': only the Pyannote model will be used,\nIf 'resemblyzer': only the Resemblyzer model will be used,\nIf '[pyannote,resemblyzer]' or vice versa: both will be used.\nDefaults to 'pyannote' if flag is given but command line arg is unspecified or if the flag is not provided at all.")
-    parser.add_argument("--num_speakers", type=int, nargs='?', default=0,
-                        help="Specifies the number of speakers, if known in advance. Used explicitly by Pyannote, otherwise number of speakers will be determined automatically.")
+    parser.add_argument("--diarizers", type=str, choices=["pyannote", "resemblyzer", "nemo"], nargs='+', default="pyannote",
+                        help="Specifies which diarizer model to use.\nIf 'pyannote': only the Pyannote model will be used, etc.,\nIf '[pyannote,resemblyzer]' or vice versa: both will be used.\nDefaults to 'pyannote' if flag is given but command line arg is unspecified or if the flag is not provided at all.")
+    parser.add_argument("--num_speakers", type=int, nargs='?', default=None,
+                        help="Specifies the number of speakers, if known in advance. Used explicitly by Pyannote and NeMo, otherwise number of speakers will be determined automatically.")
     parser.add_argument("--resemblyzer_preprocessing", default=False, action='store_true',
                         help="Flag used to specify whether to preprocess audio files in Resemblyzer style when using the Pyannote diarizer. Defaults to False if flag is not provided.")
     parser.add_argument("--similarity_threshold", type=float, default=0.7,
@@ -51,9 +71,10 @@ if __name__ == "__main__":
                         help="Flag used to specify if using the same speaker embeddings for all wav files. Defaults to False if flag is not specified.")
     # parse command line arguments
     args = parser.parse_args()
-    # root_path = "/workspace/datasets/Wearable_Audio_test"
-
 
     # setup logging to both console and logfile
     utils.setup_logging(args.folder, 'diarization.log', console=True, filemode='a')
+    # log the command that started the script
+    logging.info(f"Started script via: {' '.join(sys.argv)}")
+    
     main(args)
