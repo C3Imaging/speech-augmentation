@@ -11,6 +11,9 @@ from resemblyzer import preprocess_wav
 from scipy.io.wavfile import write
 
 
+SAMPLING_RATE = 16000
+
+
 def pyannote_diarization(root_path, num_speakers=None, resemblyzer_preprocessing=False):
     """Create RTTM files using pyannote speaker diarization model.
     Args:
@@ -70,7 +73,7 @@ def pyannote_diarization(root_path, num_speakers=None, resemblyzer_preprocessing
             logging.info(f'Pyannote diarization: RTTM file {os.path.join(subfolder, "diarization.rttm")} created.')
 
 
-def rttm_to_wav(rttm_path, wav_path, sr_out=16000, rem_files=False):
+def rttm_to_wav(rttm_path, wav_path, sr_out=16000, filter_sec=0.0, rem_files=False):
     """Segment a wav audio file according to the speakers in an RTTM file for that audio file.
 
     Args:
@@ -80,8 +83,10 @@ def rttm_to_wav(rttm_path, wav_path, sr_out=16000, rem_files=False):
             path to the multispeaker wav file to segment.
         sr_out (int):
             output sampling rate for created speaker segments audio files.
+        filter_sec (float):
+            do not include speaker audio segments from the RTTM file that are less than 'filter_sec' seconds in length in the resultant unified speaker audio file.
         rem_files (bool):
-            if True, will remove the intermediate speaker segments audio files, keeping only the unified audio file per speaker.
+            if True, will remove the intermediate speaker segments audio files, keeping only the resultant unified speaker audio file.
     """
     logging.info(f"Processing RTTM file {rttm_path} to split {wav_path} into seperate speaker files.")
     # read rttm file into a dataframe.
@@ -108,11 +113,11 @@ def rttm_to_wav(rttm_path, wav_path, sr_out=16000, rem_files=False):
         speakers_dict[speaker]+=1
     # create a unified audio file for each speaker.
     for speaker_folder in speaker_folders:
-        combine_wavs(speaker_folder)
+        combine_wavs(speaker_folder, sr_out=sr_out, filter_sec=filter_sec, rem_files=rem_files)
     logging.info(f"Processing of RTTM file {rttm_path} complete.")
 
 
-def combine_wavs(folder_path, sr_out=16000, rem_files=False):
+def combine_wavs(folder_path, sr_out=16000, filter_sec=0.0, rem_files=False):
     logging.info(f"Combining wav files in {folder_path} into a single unified wav file.")
     for dirpath, _, filenames in os.walk(folder_path, topdown=True):
         # get list of speech files from a single folder
@@ -128,11 +133,18 @@ def combine_wavs(folder_path, sr_out=16000, rem_files=False):
             wav, sr = librosa.load(speech_file, sr=None)
             if sr != sr_out:
                 wav = librosa.resample(wav, orig_sr=sr, target_sr=sr_out)
-            out_wav.append(wav)
+            # if length of audio file in seconds is less than the filter threshold, do not include it in the unified resultant audio file.
+            if filter_sec > 0.0 and float(len(wav))/SAMPLING_RATE < filter_sec:
+                pass
+            else:
+                out_wav.append(wav)
         break # loop only over the files in the topmost folder
     # collapse list of wavs into a 1D array
     out_wav = np.concatenate(out_wav).ravel()
-    wavfile.write(os.path.join(dirpath, "unified.wav"), sr_out, out_wav)
+    if len(out_wav):
+        wavfile.write(os.path.join(dirpath, "unified.wav"), sr_out, out_wav)
+    else:
+        logging.info(f"No wav files to concatenate in {dirpath}.")
 
     if rem_files:
         [os.remove(speech_file) for speech_file in speech_files]

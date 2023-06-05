@@ -241,7 +241,7 @@ if __name__ == "__main__":
     # start timing how long it takes to run script
     tic = time.perf_counter()
     # log the command that started the script
-    logging.info(f"Started script via: {' '.join(sys.argv)}")
+    logging.info(f"Started script via: python {' '.join(sys.argv)}")
 
     main()
 

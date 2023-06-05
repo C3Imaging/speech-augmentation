@@ -10,7 +10,7 @@ class Profiler():
     """Generic profiler that can time the execution of a function by calling start before the function call and stop after the function call and outputs the result via the logger."""
     def __init__(self) -> None:
         # log the command that started the script
-        logging.info(f"Started script via: {' '.join(sys.argv)}")
+        logging.info(f"Started script via: python {' '.join(sys.argv)}")
     
     def start(self):
         # start timing how long it takes to run script

@@ -70,7 +70,7 @@ class NemoDiarizer():
                 fp.write(speech_file)
                 fp.write('\n')
 
-    def nemo_diarization(self, num_speakers=None):
+    def nemo_diarization(self, num_speakers=None, filter_sec=0.0, rem_files=False):
         for dirpath, _, filenames in os.walk(self.root_path, topdown=True):
             # get list of speech files from a single folder.
             speech_files = []
@@ -90,7 +90,7 @@ class NemoDiarizer():
                 'duration':None, 
                 'label': 'infer', 
                 'text': '-', 
-                'num_speakers': num_speakers, # if None then determines automatically.
+                'num_speakers': None, # if None then determines automatically.
                 'rttm_filepath': None, 
                 'uem_filepath' : None
             }
@@ -113,7 +113,7 @@ class NemoDiarizer():
             logging.info(f'NeMo diarization: finished diarization of {speech_file}.')
 
             rttm_path = os.path.join(subfolder, 'pred_rttms', speech_file.split('/')[-1].split('.wav')[0] + ".rttm")
-            pyannote_diarization_utils.rttm_to_wav(rttm_path, speech_file, rem_files=True)
+            pyannote_diarization_utils.rttm_to_wav(rttm_path, speech_file, filter_sec=filter_sec, rem_files=rem_files)
 
 
 
