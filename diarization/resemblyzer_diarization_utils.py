@@ -2,9 +2,10 @@ import os
 import librosa
 import logging
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 from scipy.io.wavfile import write
-from resemblyzer import preprocess_wav, VoiceEncoder
+from resemblyzer import preprocess_wav, VoiceEncoder, audio
 
 
 # constants
@@ -30,6 +31,9 @@ def create_speaker_wavs(wav_path, speaker_names, start_stop_times):
     wav, sr = librosa.load(wav_path, sr=None)
     if sr != SAMPLING_RATE:
         wav = librosa.resample(wav, orig_sr=sr, target_sr=SAMPLING_RATE)
+    # TODO: try normalizing the speaker wavs too, just like the target audio file to diarize.
+    # wav = audio.normalize_volume(wav, -30, increase_only=True)
+    
     # Cut some segments from single speakers as reference audio.
     # Encoder model will later create speaker embeddings from manually selected segments of example speech from each speaker from a single audio file.
      # a segment representing a speaker = [start time in seconds, end time in seconds]
@@ -149,7 +153,7 @@ def get_speaker_segments(similarity_dict, wav_splits, similarity_threshold):
     return speaker_segments
 
 
-def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_embeds=False):
+def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_embeds=False, filter_sec=0.0):
     """Main function to create Resemblyzer diarization output.
     NOTE: if global_speaker_embeds=True, 'root_path' dir must contain a 'speaker-samples/global-speaker-samples/' subdir that contains '<speakerID>.wav audio files, one per speaker, from which speaker embeddings will be created.
      Otherwise, 'root_path' must contain a 'speaker-samples/' subdir that in turn contains a folder for each wav file (same name), which has example speech for each speaker in the audio file in the form <speaker_name>.wav
@@ -208,14 +212,64 @@ def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_
         for speaker, seg in zip(speaker_segments, wav_splits):
             if speaker != 'none':
                 speakers_frames_idxs_dict[speaker].append(np.arange(seg.start,seg.stop))
-        # collapse each speaker's lists into a 1D array of sorted unique frame indexes and write the corresponding audio frames to separate speaker files.
+        # collapse each speaker's lists into a 1D array of sorted unique frame indexes
         for k, v in speakers_frames_idxs_dict.items():
             if v:
                 speakers_frames_idxs_dict[k] = np.unique(np.concatenate(v).ravel())
-                out_wav = os.path.join(subfolder, f"{k}_unified_confthresh_{str(similarity_threshold)}.wav")
-                write(out_wav, SAMPLING_RATE, wav[speakers_frames_idxs_dict[k].tolist()])
-                logging.info(f"Resemblyzer diarization: {out_wav} created.")
             else:
                 logging.info(f"Resemblyzer diarization: {subfolder} has no diarized audio for speaker {k}.")
-        logging.info(f"Resemblyzer diarization: Population of {subfolder} with diarization wavs complete.")
+                del speakers_frames_idxs_dict[k]
+                # out_wav = os.path.join(subfolder, f"{k}_unified_confthresh_{str(similarity_threshold)}.wav")
+                # # pick out all frames (by index) from wav file that belong to speaker k.
+                # write(out_wav, SAMPLING_RATE, wav[speakers_frames_idxs_dict[k].tolist()])
+                # logging.info(f"Resemblyzer diarization: {out_wav} created.")
 
+        # initialise empty list per speaker.
+        # value per speaker will be a list of tuples, where each tuple is the start and stop frame index of a continuous segment of frames spoken by that speaker.
+        speaker_wavs = dict()
+        for speaker in speakers_frames_idxs_dict.keys():
+            speaker_wavs[speaker] = list()
+
+        # loop through all frame indexes of each speaker
+        for k, v in speakers_frames_idxs_dict.items():
+            seg_start = seg_stop = v[0] # indexes/frames
+            for i in v:
+                # stopping condition -> gap in continuous sequence detected
+                if i > seg_stop + 1:
+                    # save frames indexes seg_start and seg_stop (included) as tuple
+                    speaker_wavs[k].append((seg_start,seg_stop))
+                    # reset seg_start and seg_stop
+                    seg_start = i
+                seg_stop = i
+
+        # combine segments where the gap between them is less than 'tolerance' number of frames
+        tolerance = 50
+
+        def join_speaker_segments(speaker_wavs_dict, tolerance):
+            for k, v in speaker_wavs_dict.items():
+                for i in range(0, len(v)-1):
+                    # gap = v[i+1][0] - v[i][1] - 1
+                    # if the gap is less than or equal to the tolerance allowable, combine:
+                    if v[i+1][0] <= v[i][1] + tolerance + 1:
+                        speaker_wavs_dict[k][i] = (v[i][0], v[i+1][1]) # replace (i)'th tuple with combined
+                        del speaker_wavs_dict[k][i+1] # delete (i+1)'st tuple
+                        return True
+            return False
+
+        while join_speaker_segments(speaker_wavs, tolerance): pass
+
+        # # filter out segments shorter than filter_sec in length (in seconds)
+        # filter_sec = 1.0
+        # if filter_sec > 0.0:
+        #     for k, v in speaker_wavs.items(): speaker_wavs[k] = filter(lambda tup: float(tup[1]-tup[0]+1)/SAMPLING_RATE >= filter_sec, v)    
+
+        # create RTTM file
+        COLUMN_NAMES=['Type','File ID','Channel ID','Turn Onset','Turn Duration','Orthography Field','Speaker Type', 'Speaker Name', 'Confidence Score', 'Signal Lookahead Time']
+        df = pd.DataFrame(columns=COLUMN_NAMES, index=[0])
+        for k, v in speaker_wavs.items():
+            for tup in v:
+                df.loc[len(df.index)] = ['SPEAKER', subfolder.split('/')[-1], 1, float(tup[0]/SAMPLING_RATE), float(tup[1]-tup[0]+1)/SAMPLING_RATE, '<NA>', '<NA>', k, '<NA>', '<NA>'] 
+        df.to_csv(os.path.join(subfolder, 'diarizarion.rttm'), sep =' ', header=False, index=False)
+
+        # write(out_wav, SAMPLING_RATE, wav[seg_start:seg_stop+1])
+        # logging.info(f"Resemblyzer diarization: Population of {subfolder} with diarization wavs complete.")

@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 import pyannote_diarization_utils
 from nemo.collections.asr.models.msdd_models import NeuralDiarizer
 
+
 SAMPLING_RATE = 16000
 
 
@@ -70,7 +71,7 @@ class NemoDiarizer():
                 fp.write(speech_file)
                 fp.write('\n')
 
-    def nemo_diarization(self, num_speakers=None, filter_sec=0.0, rem_files=False):
+    def nemo_diarization(self, num_speakers=None):
         for dirpath, _, filenames in os.walk(self.root_path, topdown=True):
             # get list of speech files from a single folder.
             speech_files = []
@@ -90,7 +91,7 @@ class NemoDiarizer():
                 'duration':None, 
                 'label': 'infer', 
                 'text': '-', 
-                'num_speakers': None, # if None then determines automatically.
+                'num_speakers': num_speakers, # if None then determines automatically.
                 'rttm_filepath': None, 
                 'uem_filepath' : None
             }
@@ -110,10 +111,7 @@ class NemoDiarizer():
             self.config.num_workers = 0 # workaround to avoid DataLoader ran out of memory error.
             system_vad_msdd_model = NeuralDiarizer(cfg=self.config)
             system_vad_msdd_model.diarize()
-            logging.info(f'NeMo diarization: finished diarization of {speech_file}.')
-
-            rttm_path = os.path.join(subfolder, 'pred_rttms', speech_file.split('/')[-1].split('.wav')[0] + ".rttm")
-            pyannote_diarization_utils.rttm_to_wav(rttm_path, speech_file, filter_sec=filter_sec, rem_files=rem_files)
+            logging.info(f'NeMo diarization: finished creating RTTM file of {speech_file}.')
 
 
 

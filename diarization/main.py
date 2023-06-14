@@ -5,82 +5,78 @@ sys.path.insert(0, current + '/..')
 import logging
 import argparse
 from Tools import utils
+from config import Config
+import nemo_diarization_utils
 import pyannote_diarization_utils
 import resemblyzer_diarization_utils
-import nemo_diarization_utils
 
 
-def pyannote_pipeline(root_path, num_speakers=None, resemblyzer_preprocessing=False, filter_sec=0.0, rem_files=False):
-    logging.info("Beginning Pyannote diarization.")
-    pyannote_diarization_utils.pyannote_diarization(root_path, num_speakers=num_speakers, resemblyzer_preprocessing=resemblyzer_preprocessing)
-    # 'pyannote-diarization/' subfolder contains subfolders for each audio recording, each in turn containing a 'diarization.rttm' file.
-    # The parent folder of 'pyannote-diarization/' (i.e. root_path) should have the audio recordings wav files.
-    for dirpath, subdirs, _ in os.walk(os.path.join(root_path, "pyannote-diarization"), topdown=True):
+def create_speaker_segments(diarization_path, filter_sec=0.0, unified=False):
+    # when running diarization with any approach, a corresponding subfolder will be created, e.g.:
+    # 'pyannote-diarization/' subfolder will be created and contains a subfolder for each audio recording, each in turn containing a 'diarization.rttm' file.
+    # Same for 'resemblyzer-diarization/' and 'nemo-diarization/'.
+    # The parent folder of 'X-diarization/' folders should have the original audio recordings wav files.
+    for dirpath, subdirs, _ in os.walk(diarization_path, topdown=True):
+        # loop only over the subfolders that represent audio files.
         for subdir in subdirs:
-            # loop only over the subfolders that represent audio files.
-            rttm = [f for f in os.listdir(os.path.join(dirpath, subdir)) if f.endswith("rttm")]
+            # get rttm file from each subfolder.
+            # when using NeMo diarizer output, the path to the RTTM file is slightly different.
+            rttm = [f for f in os.listdir(os.path.join(dirpath, subdir, "pred_rttms")) if f.endswith("rttm")] if "nemo-diarization" in dirpath else [f for f in os.listdir(os.path.join(dirpath, subdir)) if f.endswith("rttm")]
             if rttm:
                 assert len(rttm) == 1, f"ERROR: there should only be one RTTM file in {os.path.join(dirpath, subdir)}!!!"
-                wav_path = os.path.join(dirpath, "resemblyzer_preproc_audio", subdir + ".wav") if resemblyzer_preprocessing else os.path.join("/".join(dirpath.split("/")[:-1]), subdir + ".wav")
-                pyannote_diarization_utils.rttm_to_wav(os.path.join(dirpath, subdir, rttm[0]), wav_path, filter_sec=filter_sec, rem_files=rem_files)
+                # when using Pyannote, there may be a resemblyzer_preproc_audio/ subfolder, which means the audio for Pyannote diarization was preprocessed in the same way as in Resemblyzer diarization, for fair comparison.
+                wav_path = os.path.join(dirpath, "resemblyzer_preproc_audio", subdir + ".wav") if os.path.exists(os.path.join(dirpath, 'resemblyzer_preproc_audio')) else os.path.join("/".join(dirpath.split("/")[:-1]), subdir + ".wav")
+                pyannote_diarization_utils.rttm_to_wav(os.path.join(dirpath, subdir, rttm[0]), wav_path, filter_sec=filter_sec, unified=unified)
         break # loop only over the first level of subdirs (where the audio file folders reside).
+    logging.info(f"Creation of speaker segments wavs from {diarization_path} complete.")
+
+
+def pyannote_pipeline(cfg):
+    logging.info("Beginning Pyannote diarization.")
+    pyannote_diarization_utils.pyannote_diarization(cfg.get("audio_folder"), num_speakers=cfg.get("diarizers/pyannote/num_speakers"), resemblyzer_preprocessing=cfg.get("diarizers/pyannote/resemblyzer_preprocessing"))
+    create_speaker_segments(os.path.join(cfg.get("audio_folder"), "pyannote-diarization"), filter_sec=cfg.get("rttm/filter_sec"), unified=cfg.get("rttm/unified"))
     logging.info("Pyannote diarization complete.")
 
 
-def resemblyzer_pipeline(root_path, similarity_threshold, global_speaker_embeds):
+def resemblyzer_pipeline(cfg):
     logging.info("Beginning Resemblyzer diarization.")
-    resemblyzer_diarization_utils.resemblyzer_diarization(root_path, similarity_threshold=similarity_threshold, global_speaker_embeds=global_speaker_embeds)
+    resemblyzer_diarization_utils.resemblyzer_diarization(cfg.get("audio_folder"), similarity_threshold=cfg.get("diarizers/resemblyzer/similarity_threshold"), global_speaker_embeds=cfg.get("diarizers/resemblyzer/global_speaker_embeddings"))
+    create_speaker_segments(os.path.join(cfg.get("audio_folder"), "resemblyzer-diarization"), filter_sec=cfg.get("rttm/filter_sec"), unified=cfg.get("rttm/unified"))
     logging.info("Resemblyzer diarization complete.")
 
 
-def nemo_pipeline(root_path, num_speakers=None, filter_sec=0.0, rem_files=False):
+def nemo_pipeline(cfg):
     logging.info("Beginning NeMo diarization.")
-    nd = nemo_diarization_utils.NemoDiarizer(root_path)
-    nd.nemo_diarization(num_speakers=num_speakers, filter_sec=filter_sec, rem_files=rem_files)
+    nemo_diarization_utils.NemoDiarizer(cfg.get("audio_folder")).nemo_diarization(num_speakers=cfg.get("diarizers/nemo/num_speakers"))
+    create_speaker_segments(os.path.join(cfg.get("audio_folder"), "nemo-diarization"), filter_sec=cfg.get("rttm/filter_sec"), unified=cfg.get("rttm/unified"))
     logging.info("NeMo diarization complete.")
 
 
-def main(args):
-    utils.mp3_to_wav(args.folder)
-    utils.audio_preprocessing(args.folder, in_place=True)
-
-    diarizers = args.diarizers
-    if type(diarizers) != list:
-        diarizers = [diarizers]
+def main(cfg):
+    utils.mp3_to_wav(cfg.get("audio_folder"))
+    utils.audio_preprocessing(cfg.get("audio_folder"), in_place=True)
     
-    if "pyannote" in diarizers:
-        pyannote_pipeline(args.folder, args.num_speakers, resemblyzer_preprocessing=args.resemblyzer_preprocessing, filter_sec=args.filter_sec, rem_files=args.rem_files)
-    if "resemblyzer" in diarizers:
-        resemblyzer_pipeline(args.folder, args.similarity_threshold, args.global_speaker_embeds)
-    if "nemo" in diarizers:
-        nemo_pipeline(args.folder, args.num_speakers, filter_sec=args.filter_sec, rem_files=args.rem_files)
+    if cfg.get("diarizers/resemblyzer/include"):
+        resemblyzer_pipeline(cfg)
+    if cfg.get("diarizers/pyannote/include"):
+        pyannote_pipeline(cfg)
+    if cfg.get("diarizers/nemo/include"):
+        nemo_pipeline(cfg)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Splits audio files in a folder into speaker-specific diarized audio snippets.")
-    parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
-                        help="Path to a folder containing audio files. Defaults to CWD if not provided.")
-    parser.add_argument("--diarizers", type=str, choices=["pyannote", "resemblyzer", "nemo"], nargs='+', default="pyannote",
-                        help="Specifies which diarizer model to use.\nIf 'pyannote': only the Pyannote model will be used, etc.,\nIf '[pyannote,resemblyzer]' or vice versa: both will be used.\nDefaults to 'pyannote' if flag is given but command line arg is unspecified or if the flag is not provided at all.")
-    parser.add_argument("--num_speakers", type=int, nargs='?', default=None,
-                        help="Specifies the number of speakers, if known in advance. Used explicitly by Pyannote and NeMo, otherwise number of speakers will be determined automatically.")
-    parser.add_argument("--resemblyzer_preprocessing", default=False, action='store_true',
-                        help="Flag used to specify whether to preprocess audio files in Resemblyzer style when using the Pyannote diarizer. Defaults to False if flag is not provided.")
-    parser.add_argument("--similarity_threshold", type=float, default=0.7,
-                        help="Specifies the speaker embedding similarity confidence threshold for Resemblyzer to use. Defaults to 0.7 if not provided.")
-    parser.add_argument("--global_speaker_embeds", default=False, action='store_true',
-                        help="Flag used to specify if Resemblyzer will be using the same speaker embeddings for all wav files. Defaults to False if flag is not specified.")
-    parser.add_argument("--filter_sec", type=float, default=0.0,
-                        help="Used to exclude in the resultant unified speaker audio file those speaker audio segments as defined in the RTTM files that are less than 'filter_sec' seconds in length. Used by Pyannote and NeMo diarizers.")
-    parser.add_argument("--rem_files", default=False, action='store_true',
-                        help="Flag used to specify whether to remove the intermediate speaker segments audio files, keeping only the resultant unified speaker audio file. Used by Pyannote and NeMo diarizers. Defaults to False if flag is not provided.")
-    # parse command line arguments
+    parser.add_argument("config_path", type=str, nargs='?', default=os.getcwd(),
+                        help="Path to a yaml config file.")
+    # parse command line arguments.
     args = parser.parse_args()
+    # create config object from yaml file.
+    cfg = Config(args.config_path)
 
-    # setup logging to both console and logfile
-    utils.setup_logging(args.folder, 'diarization.log', console=True, filemode='a')
-    # log the command that started the script
+    # setup logging to both console and logfile.
+    utils.setup_logging(cfg.get('audio_folder', os.getcwd()), 'diarization.log', console=True, filemode='a')
+    # log the command that started the script.
     logging.info(f"Started script via: python {' '.join(sys.argv)}")
     
-    main(args)
+    main(cfg)

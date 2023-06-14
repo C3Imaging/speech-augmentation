@@ -115,7 +115,7 @@ def mp3_to_wav(root_path):
         break
 
 
-def audio_preprocessing(root_path, channels=1, sr=16000, vol=0, in_place=False):
+def audio_preprocessing(root_path, channels=1, sr=16000, vol_db=0, vol_norm=False, in_place=False):
     """Apply different generic audio preprocessing steps to wav audio files in a folder, as described by the function parameters.
 
     Args:
@@ -125,15 +125,17 @@ def audio_preprocessing(root_path, channels=1, sr=16000, vol=0, in_place=False):
         the number of channels the output audio should have.
       sr (int):
         the sampling rate the output audio should have.
-      vol (int):
+      vol_db (int):
         the dB attenuation to apply to the original audio.
+      vol_norm (bool):
+        whether to normalize the volume with librosa. Use this option if you don't know the dB attenuation needed.
       in_place (bool):
         if True, replace the original audio file with the new version, otherwise save new as a separate file.
     """
-    for dirpath, _, filenames in os.walk(root_path, topdown=False):
-        # get list of speech files from a single folder
+    for dirpath, _, filenames in os.walk(root_path, topdown=True):
+        # get list of speech files from a single folder.
         speech_files = []
-        # loop through all files found
+        # loop through all files found.
         for filename in filenames:
             if filename.endswith('.wav'):
                 speech_files.append(os.path.join(dirpath, filename))
@@ -148,10 +150,10 @@ def audio_preprocessing(root_path, channels=1, sr=16000, vol=0, in_place=False):
             if audio.frame_rate != sr:
                 audio = audio.set_frame_rate(sr)
                 modifications = True
-            if vol:
-                audio = audio + vol # e.g. 15 for volume boost
+            if vol_db:
+                audio = audio + vol_db # e.g. 15 for volume boost
                 modifications = True
-            
+
             # w1 = wave.open(speech_file)
             # print("Number of channels is: ",    w1.getnchannels())
             # print("Sample width in bytes is: ", w1.getsampwidth())
@@ -167,12 +169,33 @@ def audio_preprocessing(root_path, channels=1, sr=16000, vol=0, in_place=False):
             if modifications:
                 if in_place:
                     audio.export(speech_file, format="wav")
-                    logging.info(f"{speech_file} has been modified in place with following modifications: n_channels={channels}, sampling_rate={sr}, volume_boost={vol}.")
+                    logging.info(f"{speech_file} has been modified in place with following modifications: n_channels={channels}, sampling_rate={sr}, volume_boost={vol_db}.")
                 else:
                     f = speech_file.split(".wav")[0] 
                     f = f + "__dual" if channels == 2 else f + "__mono"
                     f = f + f"_{sr}hz"
-                    f = f + f"_plus{vol}db" if vol >= 0 else f + f"_minus{vol}db"
+                    f = f + f"_plus{vol_db}db" if vol_db >= 0 else f + f"_minus{vol_db}db"
                     f = f + ".wav"
                     audio.export(f, format="wav")
                     logging.info(f"Modified version of {speech_file} saved as {f}.")
+            break # loop only over top folder
+        
+        # workaround if need to normalize audio in-place using librosa due to AudioSegment not being convertible to wav format easily, so must loop through the saved wav files again.
+        if vol_norm:
+            from scipy.io import wavfile
+            from resemblyzer.audio import normalize_volume
+            for dirpath, _, filenames in os.walk(root_path, topdown=True):
+                # get list of speech files from a single folder.
+                speech_files = []
+                # loop through all files found.
+                for filename in filenames:
+                    if filename.endswith('.wav'):
+                        speech_files.append(os.path.join(dirpath, filename))
+                for speech_file in speech_files:
+                    sr, wav = wavfile.read(speech_file)
+                    wavfile.write(speech_file.split('.wav')[0]+"test.wav", sr, wav)
+                    wav = normalize_volume(wav, -30, increase_only=True)
+                    wavfile.write(speech_file, sr, wav)
+                    logging.info(f"Volume of {speech_file} normalized.")
+                break # loop only over top folder.
+
