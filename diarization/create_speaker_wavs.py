@@ -3,7 +3,7 @@ import sys
 current = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, current + '/..')
 import argparse
-import resemblyzer_diarization_utils
+import diarization_utils
 
 
 def run_args_checks(args):
@@ -15,7 +15,7 @@ def run_args_checks(args):
 
 
 def main(args):
-    resemblyzer_diarization_utils.create_speaker_wavs(args.wav_path, args.speaker_names, args.times)
+    diarization_utils.create_speaker_wavs(args.wav_path, args.speaker_names, args.times)
 
 
 if __name__ == "__main__":

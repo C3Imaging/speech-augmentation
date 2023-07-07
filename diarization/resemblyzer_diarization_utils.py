@@ -218,12 +218,16 @@ def resemblyzer_diarization(root_path, similarity_threshold=0.7, global_speaker_
                 speakers_frames_idxs_dict[k] = np.unique(np.concatenate(v).ravel())
             else:
                 logging.info(f"Resemblyzer diarization: {subfolder} has no diarized audio for speaker {k}.")
-                del speakers_frames_idxs_dict[k]
                 # out_wav = os.path.join(subfolder, f"{k}_unified_confthresh_{str(similarity_threshold)}.wav")
                 # # pick out all frames (by index) from wav file that belong to speaker k.
                 # write(out_wav, SAMPLING_RATE, wav[speakers_frames_idxs_dict[k].tolist()])
                 # logging.info(f"Resemblyzer diarization: {out_wav} created.")
-
+        # delete any speakers that do not have any spoken segments
+        for k in list(speakers_frames_idxs_dict.keys()):
+            # hack: cast list to numpy array to check if its empty
+            v = np.array(speakers_frames_idxs_dict[k])
+            if not v.any():
+                del speakers_frames_idxs_dict[k]
         # initialise empty list per speaker.
         # value per speaker will be a list of tuples, where each tuple is the start and stop frame index of a continuous segment of frames spoken by that speaker.
         speaker_wavs = dict()

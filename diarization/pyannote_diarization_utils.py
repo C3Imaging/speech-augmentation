@@ -32,8 +32,7 @@ def pyannote_diarization(root_path, num_speakers=None, resemblyzer_preprocessing
 
     from pyannote.audio import Pipeline
 
-    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization@2.1",
-                                        use_auth_token="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")
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization@2.1", use_auth_token="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")
 
     for dirpath, _, filenames in os.walk(root_path, topdown=True):
         # get list of speech files from a single folder
@@ -90,34 +89,37 @@ def rttm_to_wav(rttm_path, wav_path, sr_out=16000, filter_sec=0.0, unified=False
     """
     logging.info(f"Processing RTTM file {rttm_path} to split {wav_path} into seperate speaker files.")
     # read rttm file into a dataframe.
-    df = pd.read_csv(rttm_path, delim_whitespace=True, header=None)
-    # manually add header fields according to description in: https://github.com/nryant/dscore#rttm
-    df.columns = ["Type", "File ID", "Channel ID", "Turn Onset", "Turn Duration", "Orthography Field", "Speaker Type", "Speaker Name", "Confidence Score", "Signal Lookahead Time"]
-    speakers = df["Speaker Name"].unique().tolist() # list of unique speakers.
-    # create a subfolder for each speaker, where audio snippets will be stored.
-    speaker_folders = []
-    for speaker in speakers:
-        subfolder = os.path.join('/'.join(rttm_path.split('/')[:-1]), speaker)
-        if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
-        speaker_folders.append(subfolder)
-    # initialise a dict with a count of utterances per speaker.
-    speakers_dict = dict()
-    for speaker in speakers:
-        speakers_dict[speaker] = 0
-    # loop through rows in df.
-    for start_time, duration, speaker in zip(df["Turn Onset"], df["Turn Duration"], df["Speaker Name"]):
-        out_dir = os.path.join('/'.join(rttm_path.split('/')[:-1]), speaker)
-        out_audio_path = os.path.join(out_dir, rttm_path.split('/')[-2] + "_" + speaker + "_" + str(speakers_dict[speaker]) + ".wav")
-        # filter out any segments of speech that are shorter than the minimum allowed length in seconds.
-        if duration >= filter_sec:
-            subprocess.run(shlex.split(f"ffmpeg -y -ss {start_time} -i {wav_path} -t {duration} {out_audio_path}"))
-            logging.info(f"{out_audio_path} created.")
-            speakers_dict[speaker]+=1
-    # create a unified audio file for each speaker.
-    if unified:
-        for speaker_folder in speaker_folders:
-            combine_wavs(speaker_folder, sr_out=sr_out)
-    logging.info(f"Processing of RTTM file {rttm_path} complete.")
+    try:
+        df = pd.read_csv(rttm_path, delim_whitespace=True, header=None)
+        # manually add header fields according to description in: https://github.com/nryant/dscore#rttm
+        df.columns = ["Type", "File ID", "Channel ID", "Turn Onset", "Turn Duration", "Orthography Field", "Speaker Type", "Speaker Name", "Confidence Score", "Signal Lookahead Time"]
+        speakers = df["Speaker Name"].unique().tolist() # list of unique speakers.
+        # create a subfolder for each speaker, where audio snippets will be stored.
+        speaker_folders = []
+        for speaker in speakers:
+            subfolder = os.path.join('/'.join(rttm_path.split('/')[:-1]), speaker)
+            if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
+            speaker_folders.append(subfolder)
+        # initialise a dict with a count of utterances per speaker.
+        speakers_dict = dict()
+        for speaker in speakers:
+            speakers_dict[speaker] = 0
+        # loop through rows in df.
+        for start_time, duration, speaker in zip(df["Turn Onset"], df["Turn Duration"], df["Speaker Name"]):
+            out_dir = os.path.join('/'.join(rttm_path.split('/')[:-1]), speaker)
+            out_audio_path = os.path.join(out_dir, rttm_path.split('/')[-2] + "_" + speaker + "_" + str(speakers_dict[speaker]) + ".wav")
+            # filter out any segments of speech that are shorter than the minimum allowed length in seconds.
+            if duration >= filter_sec:
+                subprocess.run(shlex.split(f"ffmpeg -y -ss {start_time} -i {wav_path} -t {duration} {out_audio_path}"))
+                logging.info(f"{out_audio_path} created.")
+                speakers_dict[speaker]+=1
+        # create a unified audio file for each speaker.
+        if unified:
+            for speaker_folder in speaker_folders:
+                combine_wavs(speaker_folder, sr_out=sr_out)
+        logging.info(f"Processing of RTTM file {rttm_path} complete.")
+    except pd.errors.EmptyDataError:
+        logging.info(f"{rttm_path} is empty. No speaker segments will be created from {wav_path}")
 
 
 def combine_wavs(folder_path, sr_out=16000):

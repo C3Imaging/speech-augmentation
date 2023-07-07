@@ -1,24 +1,26 @@
 # Path to a folder containing audio files to diarize.
-audio_folder: /workspace/datasets/Wearable_Audio_T
+audio_folder: /workspace/datasets/Wearable_Audio_new1
 # Specifies which diarizer models to use by setting include to True.
 diarizers:
   resemblyzer:
     include: True
     # Specifies the speaker embedding similarity confidence threshold for determining which speaker is speaking during an audio segment.
     similarity_threshold: 0.7
-    # Specifies whether to use the same speaker embeddings for all wav files.
-    global_speaker_embeddings: True
+    # Specifies whether to use the same speaker embeddings for all wav files. Leave as False if you don't know.
+    global_speaker_embeddings: False
   pyannote:
     include: False
-    # Specifies the number of speakers, if known in advance, otherwise number of speakers will be determined automatically.
+    # Specifies the number of speakers, if known in advance, 
+    # otherwise set it to null and the number of speakers will be determined automatically.
     num_speakers: null
     resemblyzer_preprocessing: False
   nemo:
     include: False
-    # Specifies the number of speakers, if known in advance, otherwise number of speakers will be determined automatically.
+    # Specifies the number of speakers, if known in advance, 
+    # otherwise set it to null and the number of speakers will be determined automatically.
     num_speakers: null
 rttm:
   # Filter out those speaker audio segments, as defined in the RTTM files, that are less than 'filter_sec' seconds in length.
-  filter_sec: 0.0
+  filter_sec: 1.0
   # Specifies whether to create a unified speaker segments audio file.
   unified: True
