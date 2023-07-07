@@ -58,15 +58,17 @@ Using the dataset from Step 2, we run **cleese_audio_augmentation.py** to produc
 
 ## ASR Inference
 Current ASR models available:
-- wav2vec2 (fairseq framework): You can run `wav2vec2_infer_custom.py` (run `python wav2vec2_infer_custom.py --help` for a description of the usage) to generate hypothesis text transcripts from an audio dataset.
-<br />
-**NOTE:** You must manually specify the ASR pipeline you want to use in the code under the comment `# create model + decoder pair`. There are a number of possible combinations of ASR model (wav2vec2 that has args field or cfg field) + Decoder [+ LM] to choose from. You must also manually edit the file `Tools/decoding_utils.py` with paths local to you in the following places:<br />
-- BeamSearchKenLMDecoder_Fairseq -> __init__ -> kenlm_model
-- BeamSearchKenLMDecoder_Fairseq -> __init__ -> lexicon
-- TransformerDecoder -> __init__ -> transformerLM_root_folder
-- TransformerDecoder -> __init__ -> lexicon
+- wav2vec2 (fairseq framework): You can run `wav2vec2_infer_custom.py` (run `python wav2vec2_infer_custom.py --help` for a description of the usage) to generate hypothesis text transcripts from an unlabelled audio dataset.
+**NOTE:** You must manually specify the ASR pipeline you want to use in the code under the comment `# create model + decoder pair`. There are a number of possible combinations of ASR model + Decoder + [optional external Language Model] to choose from. Please see `decoding_utils/Wav2Vec2_Decoder_Factory` class for a list of the implemented pipelines.<br />
+**Wav2Vec2 ASR Pipeline Notes:**
+  1. a wav2vec2 checkpoint file can have its arch defined in the **"args"** field or **"cfg"** field, depending on the version of the fairseq framework used to train the model. If you get an error using a "get_args_" function from the Wav2Vec2 factory class, the checkpoint is likely a **"cfg"** one, thus try using the "get_cfg_" equivalent function instead and vice versa).
+  2. You must also manually edit the file `Tools/decoding_utils.py` with paths local to you in the following places:<br />
+- `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> kenlm_model` (if using a KenLM external language model)
+- `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> lexicon` (if using a KenLM external language model)
+- `TransformerDecoder -> __init__ -> transformerLM_root_folder` (if using a TransformerLM external language model)
+- `TransformerDecoder -> __init__ -> lexicon` (if using a TransformerLM external language model)
 <br /><br />
-Future ASR models to be integrated:<br />
+Future ASR models to be integrated with their own factories:<br />
 - Conformer-Transducer (NeMo framework)
 
 ## Forced Alignment
@@ -81,5 +83,12 @@ Current ASR models available:
 Current Speaker Diarization models available:
 - Pyannote
 - Resemblyzer
-<br />
-Both can be accessed using `diarization/main.py` (run `python diarization/main.py --help` for a description of the usage)
+- NeMo MSDD<br /><br />
+All are accessed using `diarization/main.py` (run `python diarization/main.py --help` for a description of the usage).<br />
+The configuration for a diarization run can be modified in the `diarization/diarization.yaml` file.<br /><br />
+**Resemblyzer Diairization Notes:**
+  1. Resemblyzer allows the user to specify an example speech audio wav for each speaker from which a speaker embedding will be created, across all multipeaker audiofiles. To enable this functionality, you must create the following folder structure:<br /><br />
+     In the main folder where the multispeaker audiofiles are located, create a `speaker-samples` subfolder. In it, create a subfolder for each audiofile with the same name as the audiofile. In each of these subfolders, have a `<SPEAKER_ID>.WAV` file for each speaker you wish to segment in the corresponding multispeaker audiofile from the main folder.<br /><br />
+**NOTE:** Resemblyzer **requires** separate audiofiles from which to create speaker embeddings, so this step is **mandatory**.
+
+
