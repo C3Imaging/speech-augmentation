@@ -197,9 +197,10 @@ class ResemblyzerDiarizer(BaseDiarizer):
             while join_speaker_segments(speaker_wavs, tolerance): pass
 
             # # filter out segments shorter than filter_sec in length (in seconds) so they don't get included in the created RTTM file.
-            # filter_sec = 1.0
+            # # already done in rttm_to_wav
+            # filter_sec = self.cfg.get("rttm/filter_sec")
             # if filter_sec > 0.0:
-            #     for k, v in speaker_wavs.items(): speaker_wavs[k] = filter(lambda tup: float(tup[1]-tup[0]+1)/SAMPLING_RATE >= filter_sec, v)    
+            #     for k, v in speaker_wavs.items(): speaker_wavs[k] = list(filter(lambda tup: float(tup[1]-tup[0]+1)/self.sampling_rate >= filter_sec, v))
 
             # create RTTM file
             COLUMN_NAMES=['Type','File ID','Channel ID','Turn Onset','Turn Duration','Orthography Field','Speaker Type', 'Speaker Name', 'Confidence Score', 'Signal Lookahead Time']
@@ -536,6 +537,43 @@ def combine_wavs(folder_path, sr_out=16000):
     
     logging.info(f"Combining wav files in {folder_path} complete.")
 
+
+def rttm_filter(folder_path, filter_sec=0.0):
+    """Remove lines in RTTM file that have durations shorter than the filter time defined in the diarization YAML file."""
+    for dirpath, _, filenames in os.walk(folder_path, topdown=False):
+        rttm = list(filter(lambda filename: filename.endswith(".rttm"), filenames))
+        if rttm:
+            rttm_path = os.path.join(dirpath, rttm[0])
+            temp_rttm = os.path.join(dirpath, rttm[0].split(".rttm")[0] + "temp.rttm")
+            with open(temp_rttm, 'a') as f_temp:
+                # read rttm file into a dataframe.
+                try:
+                    df = pd.read_csv(rttm_path, delim_whitespace=True, header=None)
+                    # manually add header fields according to description in: https://github.com/nryant/dscore#rttm
+                    df.columns = ["Type", "File ID", "Channel ID", "Turn Onset", "Turn Duration", "Orthography Field", "Speaker Type", "Speaker Name", "Confidence Score", "Signal Lookahead Time"]
+                    speakers = df["Speaker Name"].unique().tolist() # list of unique speakers.
+                    # create a subfolder for each speaker, where audio snippets will be stored.
+                    speaker_folders = []
+                    for speaker in speakers:
+                        subfolder = os.path.join('/'.join(rttm_path.split('/')[:-1]), speaker)
+                        if not os.path.exists(subfolder): os.makedirs(subfolder, exist_ok=True)
+                        speaker_folders.append(subfolder)
+                    # initialise a dict with a count of utterances per speaker.
+                    speakers_dict = dict()
+                    for speaker in speakers:
+                        speakers_dict[speaker] = 0
+                    # loop through rows in df.
+                    for index, row in df.iterrows():
+                        # Filter out any segments of speech that are shorter than the minimum allowed length in seconds.
+                        if row['Turn Duration'] >= filter_sec:
+                            # Write line that passes the filter to the temp RTTM file.
+                            f_temp.write(f"SPEAKER\t{row['File ID']}\t1\t{row['Turn Onset']}\t{row['Turn Duration']}\t<NA>\t<NA>\t{row['Speaker Name']}\t<NA>\t<NA>\n")
+                except pd.errors.EmptyDataError:
+                    pass
+            os.remove(rttm_path)
+            os.rename(temp_rttm, rttm_path)
+
+
 # class for evaluating the quality of different diarizers.
 class Diarization_Eval():
     def __init__(self, gt_rttms: List[str], hyp_rttms: List[str]) -> None:
@@ -567,7 +605,7 @@ class Diarization_Eval():
 
         self.gt_dfs, self.hyp_dfs = gt_dfs, hyp_dfs
     
-    def _calculate_edgecase_errors(self) -> float:
+    def _calculate_edgecase_errors_single(self) -> float:
         """Runs multiple edge case scenarios as a preprocessing/prefiltering stage before running calculate_error.
         Returns 1.0 if an edge case happens, meaning error is maximum, else returns 0.0, meaning no edge case happened."""
 
@@ -584,11 +622,12 @@ class Diarization_Eval():
     def calculate_error(self, evaluation_metric) -> float:
         """Calculates the difference/divergence/error in range [0.0,1.0] between each pair of ground-truth and hypothesis diarizations
         according to a particular implementation metric function passed as an argument and returns the average value."""
-        edge_case_error = self._calculate_edgecase_errors()
-        if not edge_case_error:
-            return evaluation_metric(self.gt_dfs, self.hyp_dfs)
-        else:
-            return edge_case_error
+        # edge_case_error = self._calculate_edgecase_errors()
+        # if not edge_case_error:
+        #     return evaluation_metric(self.gt_dfs, self.hyp_dfs)
+        # else:
+        #     return edge_case_error
+        return evaluation_metric(self.gt_dfs, self.hyp_dfs)
 
 # different evaluation metrics to run between a list of ground truth RTTM files loaded as dataframes and a corresponding list of hypothesis dataframes, returning the average.
 def evalMetric_gtSpeakerTimeCounter(gt_dfs: List[pd.DataFrame], hyp_dfs: List[pd.DataFrame]) -> float:
@@ -628,7 +667,7 @@ def evalMetric_gtSpeakerTimeCounter(gt_dfs: List[pd.DataFrame], hyp_dfs: List[pd
             diff = abs(gt_sec - hyp_sec)
             # map time difference to an error value according to the gauge.
             err = 1.0 if diff >= 10.0 else diff
-            err_accum1 += e
+            err_accum1 += err
         # get the average error for this diarizer on all its total speaker time predictions for the ground truth speakers in this RTTM pair. 
         err_avg1 = err_accum1 / len(gt_speakers_times)
         err_avg_accum_total += err_avg1
@@ -636,7 +675,58 @@ def evalMetric_gtSpeakerTimeCounter(gt_dfs: List[pd.DataFrame], hyp_dfs: List[pd
     err_avg_total = err_avg_accum_total / len(gt_dfs)
 
     return err_avg_total
-        
 
 
+def evalMetric_DER(gt_dfs: List[pd.DataFrame], hyp_dfs: List[pd.DataFrame]) -> float:
+    """The classic Diarization Error Rate metric function implemented by Pyannote."""
 
+    from pyannote.core import Annotation, Segment
+    from pyannote.metrics.diarization import DiarizationErrorRate
+
+    diarizationErrorRate = DiarizationErrorRate()
+    der_total = 0.0
+
+    # loop through pairs of ground truth and hypothesis rttm dataframes.
+    i=0
+    for gt_df, hyp_df in zip(gt_dfs, hyp_dfs):
+        # create ground truth annotation list.
+        reference = Annotation()
+        for index, row in gt_df.iterrows():
+            start_time = float(row['Turn Onset'])
+            end_time = start_time + float(row['Turn Duration'])
+            reference[Segment(start_time, end_time)] = row['Speaker Name']
+        # create hypothesis annotation list.
+        hypothesis = Annotation()
+        for index, row in hyp_df.iterrows():
+            start_time = float(row['Turn Onset'])
+            end_time = start_time + float(row['Turn Duration'])
+            hypothesis[Segment(start_time, end_time)] = row['Speaker Name']
+        der_total += diarizationErrorRate(reference, hypothesis)
+        i+=1
+
+    print("DER = {0:.3f}".format(der_total, uem=Segment(0, 40)))
+
+    return der_total
+
+
+if __name__ == "__main__":
+    # diarization evaluation.
+    gt_folder = "/workspace/datasets/diarization_eval_dataset"
+    hyp_folder = "/workspace/datasets/diarization_eval/diarization_eval_dataset_results1/pyannote-diarization"
+    # get list of ground truth rttm filepaths.
+    # they are located in a single parent folder.
+    for _, _, filenames in os.walk(gt_folder, topdown=True):
+        gt_rttms = [os.path.join(gt_folder, filename) for filename in filenames if filename.endswith('.rttm')]
+        gt_rttms.sort()
+        break # only loop over parent folder.
+    # get list of hypothesis rttm filepaths.
+    # extract all rttm files found in any subfolders.    
+    hyp_rttms = list()
+    for folder, _, filenames in os.walk(hyp_folder, topdown=True):
+        hyp_rttms.append([os.path.join(folder, filename) for filename in filenames if filename.endswith('.rttm')])
+    hyp_rttms = [x for sublist in hyp_rttms for x in sublist]
+    hyp_rttms.sort()
+    # perform diarization evaluation according to some metric function.
+    diar_eval = Diarization_Eval(gt_rttms, hyp_rttms)
+    DER = diar_eval.calculate_error(evalMetric_DER)
+    print(DER)

@@ -22,14 +22,18 @@ def create_speaker_segments(diarization_path, filter_sec=0.0, unified=False):
     for dirpath, subdirs, _ in os.walk(diarization_path, topdown=True):
         # loop only over the subfolders that represent audio files.
         for subdir in subdirs:
-            # get rttm file from each subfolder.
-            # when using NeMo diarizer output, the path to the RTTM file is slightly different.
-            rttm = [f for f in os.listdir(os.path.join(dirpath, subdir, "pred_rttms")) if f.endswith("rttm")] if "nemo-diarization" in dirpath else [f for f in os.listdir(os.path.join(dirpath, subdir)) if f.endswith("rttm")]
-            if rttm:
-                assert len(rttm) == 1, f"ERROR: there should only be one RTTM file in {os.path.join(dirpath, subdir)}!!!"
-                # when using Pyannote, there may be a resemblyzer_preproc_audio/ subfolder, which means the audio for Pyannote diarization was preprocessed in the same way as in Resemblyzer diarization, for fair comparison.
-                wav_path = os.path.join(dirpath, "resemblyzer_preproc_audio", subdir + ".wav") if os.path.exists(os.path.join(dirpath, 'resemblyzer_preproc_audio')) else os.path.join("/".join(dirpath.split("/")[:-1]), subdir + ".wav")
-                diarization_utils.rttm_to_wav(os.path.join(dirpath, subdir, rttm[0]), wav_path, filter_sec=filter_sec, unified=unified)
+            if 'nemo' not in subdir:
+                # get rttm file from each subfolder.
+                # when using NeMo diarizer output, the path to the RTTM file is slightly different.
+                rttm = [f for f in os.listdir(os.path.join(dirpath, subdir, "pred_rttms")) if f.endswith("rttm")] if "nemo-diarization" in dirpath else [f for f in os.listdir(os.path.join(dirpath, subdir)) if f.endswith("rttm")]
+                if rttm:
+                    assert len(rttm) == 1, f"ERROR: there should only be one RTTM file in {os.path.join(dirpath, subdir)}!!!"
+                    # when using Pyannote, there may be a resemblyzer_preproc_audio/ subfolder, which means the audio for Pyannote diarization was preprocessed in the same way as in Resemblyzer diarization, for fair comparison.
+                    wav_path = os.path.join(dirpath, "resemblyzer_preproc_audio", subdir + ".wav") if os.path.exists(os.path.join(dirpath, 'resemblyzer_preproc_audio')) else os.path.join("/".join(dirpath.split("/")[:-1]), subdir + ".wav")
+                    # nemo diarization has an extra subfolder
+                    subdir = os.path.join(subdir, "pred_rttms") if 'nemo' in dirpath else subdir
+                    
+                    diarization_utils.rttm_to_wav(os.path.join(dirpath, subdir, rttm[0]), wav_path, filter_sec=filter_sec, unified=unified)
         break # loop only over the first level of subdirs (where the audio file folders reside).
     logging.info(f"Creation of speaker segments wavs from {diarization_path} complete.")
 
@@ -47,6 +51,7 @@ def pyannote_pipeline(cfg):
     d = diarization_utils.PyannoteDiarizer(cfg)
     d.diarize()
     create_speaker_segments(os.path.join(cfg.get("audio_folder"), "pyannote-diarization"), filter_sec=cfg.get("rttm/filter_sec"), unified=cfg.get("rttm/unified"))
+    diarization_utils.rttm_filter(os.path.join(cfg.get("audio_folder"), "pyannote-diarization"), filter_sec=cfg.get("rttm/filter_sec"))
     logging.info("Pyannote diarization complete.")
 
 
@@ -55,6 +60,7 @@ def nemo_pipeline(cfg):
     d = diarization_utils.NemoDiarizer(cfg)
     d.diarize()
     create_speaker_segments(os.path.join(cfg.get("audio_folder"), "nemo-diarization"), filter_sec=cfg.get("rttm/filter_sec"), unified=cfg.get("rttm/unified"))
+    diarization_utils.rttm_filter(os.path.join(cfg.get("audio_folder"), "nemo-diarization"), filter_sec=cfg.get("rttm/filter_sec"))
     logging.info("NeMo diarization complete.")
 
 
