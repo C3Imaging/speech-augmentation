@@ -156,12 +156,29 @@ class ResemblyzerDiarizer(BaseDiarizer):
                     # # pick out all frames (by index) from wav file that belong to speaker k.
                     # write(out_wav, SAMPLING_RATE, wav[speakers_frames_idxs_dict[k].tolist()])
                     # logging.info(f"Resemblyzer diarization: {out_wav} created.")
+
+            # there will be overlapping indexes when two speakers talk right after one another,
+            # therefore remove any common indexes across all speakers.
+            from collections import defaultdict
+            idxs_dict = defaultdict(list)
+            for k, v in speakers_frames_idxs_dict.items():
+                for i in v:
+                    idxs_dict[i].append(k)
+            unique_idxs = list(filter(lambda tup: len(tup[1]) == 1, idxs_dict.items()))
+            # clear values of speakers_frames_idxs_dict to empty arrays
+            for k, v in speakers_frames_idxs_dict.items():
+                speakers_frames_idxs_dict[k] = list()
+            # reconstruct speakers_frames_idxs_dict dict with value being list of unique indexes
+            for idx, speaker_list in unique_idxs:
+                speakers_frames_idxs_dict[speaker_list[0]].append(idx)
+
             # delete any speakers that do not have any spoken segments
             for k in list(speakers_frames_idxs_dict.keys()):
                 # hack: cast list to numpy array to check if its empty
                 v = np.array(speakers_frames_idxs_dict[k])
                 if not v.any():
                     del speakers_frames_idxs_dict[k]
+
             # initialise empty list per speaker.
             # value per speaker will be a list of tuples, where each tuple is the start and stop frame index of a continuous segment of frames spoken by that speaker.
             speaker_wavs = dict()
@@ -170,6 +187,7 @@ class ResemblyzerDiarizer(BaseDiarizer):
 
             # loop through all frame indexes of each speaker
             for k, v in speakers_frames_idxs_dict.items():
+                gap = False # flag whether first gap has occurred or not
                 seg_start = seg_stop = v[0] # indexes/frames
                 for i in v:
                     # stopping condition -> gap in continuous sequence detected
@@ -178,7 +196,11 @@ class ResemblyzerDiarizer(BaseDiarizer):
                         speaker_wavs[k].append((seg_start,seg_stop))
                         # reset seg_start and seg_stop
                         seg_start = i
+                        gap = True
                     seg_stop = i
+                if not gap:
+                    # only one speaker segment was detected for this speaker.
+                    speaker_wavs[k].append((seg_start,seg_stop))
 
             # combine segments where the gap between them is less than 'tolerance' number of frames
             tolerance = 50
@@ -186,7 +208,7 @@ class ResemblyzerDiarizer(BaseDiarizer):
             def join_speaker_segments(speaker_wavs_dict, tolerance):
                 for k, v in speaker_wavs_dict.items():
                     for i in range(0, len(v)-1):
-                        # gap = v[i+1][0] - v[i][1] - 1
+                        # gap is = v[i+1][0] - v[i][1] - 1
                         # if the gap is less than or equal to the tolerance allowable, combine:
                         if v[i+1][0] <= v[i][1] + tolerance + 1:
                             speaker_wavs_dict[k][i] = (v[i][0], v[i+1][1]) # replace (i)'th tuple with combined
@@ -687,7 +709,6 @@ def evalMetric_DER(gt_dfs: List[pd.DataFrame], hyp_dfs: List[pd.DataFrame]) -> f
     der_total = 0.0
 
     # loop through pairs of ground truth and hypothesis rttm dataframes.
-    i=0
     for gt_df, hyp_df in zip(gt_dfs, hyp_dfs):
         # create ground truth annotation list.
         reference = Annotation()
@@ -702,7 +723,6 @@ def evalMetric_DER(gt_dfs: List[pd.DataFrame], hyp_dfs: List[pd.DataFrame]) -> f
             end_time = start_time + float(row['Turn Duration'])
             hypothesis[Segment(start_time, end_time)] = row['Speaker Name']
         der_total += diarizationErrorRate(reference, hypothesis)
-        i+=1
 
     print("DER = {0:.3f}".format(der_total, uem=Segment(0, 40)))
 
@@ -712,7 +732,7 @@ def evalMetric_DER(gt_dfs: List[pd.DataFrame], hyp_dfs: List[pd.DataFrame]) -> f
 if __name__ == "__main__":
     # diarization evaluation.
     gt_folder = "/workspace/datasets/diarization_eval_dataset"
-    hyp_folder = "/workspace/datasets/diarization_eval/diarization_eval_dataset_results1/pyannote-diarization"
+    hyp_folder = "/workspace/datasets/diarization_eval/diarization_eval_dataset_results1/resemblyzer-diarization"
     # get list of ground truth rttm filepaths.
     # they are located in a single parent folder.
     for _, _, filenames in os.walk(gt_folder, topdown=True):
@@ -728,5 +748,4 @@ if __name__ == "__main__":
     hyp_rttms.sort()
     # perform diarization evaluation according to some metric function.
     diar_eval = Diarization_Eval(gt_rttms, hyp_rttms)
-    DER = diar_eval.calculate_error(evalMetric_DER)
-    print(DER)
+    diar_eval.calculate_error(evalMetric_DER) # compute DER metric for diarization evaluation.

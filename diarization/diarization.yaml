@@ -5,17 +5,17 @@ diarizers:
   resemblyzer:
     include: True
     # Specifies the speaker embedding similarity confidence threshold for determining which speaker is speaking during an audio segment.
-    similarity_threshold: 0.7
+    similarity_threshold: 0.65
     # Specifies whether to use the same speaker embeddings for all wav files. Leave as False if you don't know.
     global_speaker_embeddings: False
   pyannote:
-    include: True
+    include: False
     # Specifies the number of speakers, if known in advance, 
     # otherwise set it to null and the number of speakers will be determined automatically.
     num_speakers: null
     resemblyzer_preprocessing: False
   nemo:
-    include: True
+    include: False
     # Specifies the number of speakers, if known in advance, 
     # otherwise set it to null and the number of speakers will be determined automatically.
     num_speakers: null

@@ -43,6 +43,8 @@ def resemblyzer_pipeline(cfg):
     d = diarization_utils.ResemblyzerDiarizer(cfg)
     d.diarize()
     create_speaker_segments(os.path.join(cfg.get("audio_folder"), "resemblyzer-diarization"), filter_sec=cfg.get("rttm/filter_sec"), unified=cfg.get("rttm/unified"))
+    diarization_utils.rttm_filter(os.path.join(cfg.get("audio_folder"), "resemblyzer-diarization"), filter_sec=cfg.get("rttm/filter_sec"))
+
     logging.info("Resemblyzer diarization complete.")
 
 
