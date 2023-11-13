@@ -75,7 +75,7 @@ Future ASR models to be integrated with their own factories:<br />
 
 Forced alignment between paired text and audio data (a.k.a generating timestaps for the words in the text transcript) can be performed using ASR or TTS models.
 
-Current ASR models available:
+Current available ASR-based approaches`:
 - wav2vec2 (from torchaudio **AND** custom wav2vec2 models now supported): You can run `wav2vec2_forced_alignment_libri.py` (run `python wav2vec2_forced_alignment_libri.py --help` for a description of the usage) to generate time alignments for paired <text,audio> datasets whose transcripts are saved in LibriSpeech **OR** LibriTTS format.
 - whisper: You can generate transcripts with Whisper and time align the generated transcript with the speech file using Dynamic Time Warping (run `python whisper_forced_alignment.py --help` for a description of the usage).
 
