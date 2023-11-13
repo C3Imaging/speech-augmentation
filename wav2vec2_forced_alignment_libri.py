@@ -1,4 +1,4 @@
-# align transcript to speech with CTC segmentation algorithm
+# align transcript to speech at the word level with CTC segmentation algorithm
 # Wav2Vec2 model is used for acoustic feature extraction
 # based on the tutorial: https://pytorch.org/audio/stable/tutorials/forced_alignment_tutorial.html
 
@@ -43,9 +43,7 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
     """
     with torch.inference_mode():
         # loop through audio files
-        for speech_filename, transcript in zip(speech_files, transcripts):
-            # create separate subdir for experiment outputs for this speech file
-            
+        for speech_filename, transcript in zip(speech_files, transcripts):            
             # get speech segment index from the filename
             if args.libritts:
                 speech_idx = speech_filename.split('.wav')[0].split('/')[-1]
