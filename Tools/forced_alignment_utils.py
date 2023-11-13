@@ -26,7 +26,7 @@ class Segment:
         return self.end - self.start
 
 
-def plot_alignments(bundle, trellis, segments, word_segments, waveform):
+def plot_alignments(sr, trellis, segments, word_segments, waveform):
     trellis_with_path = trellis.clone()
     for i, seg in enumerate(segments):
         if seg.label != "|":
@@ -60,7 +60,7 @@ def plot_alignments(bundle, trellis, segments, word_segments, waveform):
         if seg.label != "|":
             ax2.annotate(seg.label, (seg.start * ratio, 0.9))
     xticks = ax2.get_xticks()
-    plt.xticks(xticks, xticks / bundle.sample_rate)
+    plt.xticks(xticks, xticks / sr)
     ax2.set_xlabel("time [second]")
     ax2.set_yticks([])
     ax2.set_ylim(-1.0, 1.0)

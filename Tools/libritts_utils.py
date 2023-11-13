@@ -102,7 +102,7 @@ def get_speech_data_lists(dirpath, filenames):
     for filename in filenames:
         if filename.endswith('.flac') or filename.endswith('.wav'):
             speech_files.append(os.path.join(dirpath, filename))
-        elif filename.endswith('.normalized.txt'):
+        elif filename.endswith('.txt'):
             transcripts_files.append(os.path.join(dirpath, filename))
 
     # check if it is a leaf folder

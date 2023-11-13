@@ -41,11 +41,10 @@ def main(args):
     # create output dir if it doesnt exist.
     if not os.path.exists(args.out_dir): os.makedirs(args.out_dir, exist_ok=True)
 
-    # create model + decoder pair.
-
+    # create model + decoder pair (change manually).
     if args.model_path:
-        asr = Wav2Vec2_Decoder_Factory.get_args_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path)
-        # asr = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=args.model_path, vocab_path=args.vocab_path)
+        # asr = Wav2Vec2_Decoder_Factory.get_args_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path)
+        asr = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=args.model_path, vocab_path=args.vocab_path)
     else:
         # default to torchaudio wav2vec2 model if not using a custom .pt checkpoint.
         asr = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy()

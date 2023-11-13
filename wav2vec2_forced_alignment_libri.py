@@ -12,6 +12,8 @@ import torchaudio
 import matplotlib
 import matplotlib.pyplot as plt
 from Tools import utils, forced_alignment_utils, librispeech_utils, libritts_utils
+from Tools.decoding_utils import Wav2Vec2_Decoder_Factory
+
 
 
 def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
@@ -46,17 +48,19 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
             
             # get speech segment index from the filename
             if args.libritts:
-                speech_idx = "_".join(speech_filename.split('.wav')[0].split('_')[-2:])
+                speech_idx = speech_filename.split('.wav')[0].split('/')[-1]
             else:
-                speech_idx = speech_filename.split('.flac')[0].split('-')[-1]
+                speech_idx = speech_filename.split('.flac')[0].split('-')[-1] if ".flac" in speech_filename else speech_filename.split('.wav')[0].split('-')[-1]
             # create output subfolder for an audio file
             cur_out_dir = os.path.join(root_cur_out_dir, speech_idx)
             if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
 
-            # generate the label class probability of each audio frame using wav2vec2 for each label (outputs are actually in logits, not probabilities)
-            waveform, _ = torchaudio.load(speech_filename)
-            emissions, _ = model(waveform.to(device))
-            emissions = torch.log_softmax(emissions, dim=-1) # probability in log domain to avoid numerical instability
+            if args.model_path:
+                emissions = model.forward([speech_filename], device)
+            else:
+                # generate the label class probability of each audio frame using wav2vec2 for each label (outputs are actually in logits, not probabilities)
+                emissions, _ = model(waveform.to(device))
+                emissions = torch.log_softmax(emissions, dim=-1) # probability in log domain to avoid numerical instability
             # probability of each vocabulary label at each time step
             # for silences, wav2vec2 predicts the '|' label with very high probability, which is the word boundary label
             emission = emissions[0].cpu().detach()
@@ -92,6 +96,7 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
 
             word_segments = forced_alignment_utils.merge_words(segments)
 
+            waveform, _ = torchaudio.load(speech_filename)
             # for debugging purposes, --save_figs flag
             if args.save_figs:
                 forced_alignment_utils.plot_trellis_with_path(trellis, path)
@@ -100,7 +105,7 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
                 forced_alignment_utils.plot_trellis_with_segments(path, trellis, segments, transcript)
                 plt.savefig(os.path.join(cur_out_dir, 'trellis_with_frames.png'))
 
-                forced_alignment_utils.plot_alignments(bundle, trellis, segments, word_segments, waveform[0])
+                forced_alignment_utils.plot_alignments(sr, trellis, segments, word_segments, waveform[0])
                 plt.savefig(os.path.join(cur_out_dir, 'trellis_with_waveform.png'))
             
             with open(os.path.join(cur_out_dir, 'alignments.txt'), 'w') as f:
@@ -111,12 +116,12 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
                     ratio = waveform.size(1) / (trellis.size(0) - 1)
                     x0 = int(ratio * word.start)
                     x1 = int(ratio * word.end)
-                    f.write(f"{word.score:.2f},{word.label},{x0 / bundle.sample_rate:.3f},{x1 / bundle.sample_rate:.3f}\n")
+                    f.write(f"{word.score:.2f},{word.label},{x0 / sr:.3f},{x1 / sr:.3f}\n")
                     # for debugging purposes, --save_audio flag
                     if args.save_audio:
                         # save snippet of audio where only the word is present
                         segment = waveform[:, x0:x1]
-                        torchaudio.save(os.path.join(cur_out_dir, f"word{i}_{word.label}.wav"), segment, bundle.sample_rate)
+                        torchaudio.save(os.path.join(cur_out_dir, f"word{i}_{word.label}.wav"), segment, sr)
                         i+=1
 
 
@@ -137,7 +142,7 @@ def run_inference():
 
     for dirpath, _, filenames in os.walk(args.folder, topdown=asleaf): # if topdown=True, read contents of folder before subfolders, otherwise the reverse logic applies
         # if this script was run previously, an output folder will be present in the folder where the audio files we want to process are, skip it and its subfolders
-        if out_dir not in dirpath:
+        if W2V2_ALIGNS_PREFIX not in dirpath:
             # get list of speech files and corresponding transcripts from a single folder
             if args.libritts:
                 speech_files, transcripts = libritts_utils.get_speech_data_lists(dirpath, filenames)
@@ -159,39 +164,62 @@ def run_inference():
 def main():
     "Setup and use wav2vec2 model for time alignment between ground truth transcript and audio file from Librispeech dataset."
     # setup inference model variables
-    global bundle, model, labels, dictionary
-    bundle = torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H # wav2vec2 model trained for ASR, sample rate = 16kHz
-    model = bundle.get_model().to(device) # wav2vec2 model on GPU
-    labels = bundle.get_labels() # vocab of chars known to wav2vec2
-    dictionary = {c: i for i, c in enumerate(labels)}
-    
+    global model, labels, dictionary, sr
+
+    if args.model_path:
+        # create model + decoder pair (change manually).
+        asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path)
+        model = asr.model
+        labels = list()
+        with open(args.vocab_path, 'r') as file: lines = file.readlines()
+        for line in lines:
+            line = line.split(' ')[0]
+            labels.append(line)
+        dictionary = {c: i for i, c in enumerate(labels)}
+        sr = asr.model.sample_rate
+    else:
+        # default to torchaudio wav2vec2 model if not using a custom .pt checkpoint.
+        bundle = torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H # wav2vec2 model trained for ASR, sample rate = 16kHz
+        model = bundle.get_model().to(device) # wav2vec2 model on GPU
+        labels = bundle.get_labels() # vocab of chars known to wav2vec2
+        dictionary = {c: i for i, c in enumerate(labels)}
+        sr = bundle.sample_rate
+
     run_inference()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run ASR inference (decoding) using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech/LibriTTS dataset. NOTE1: currently, this script can only use wav2vec2 ASR models from torchaudio library. NOTE2: Script is updated with LibriTTS support, but must provide a '--libritts' flag.")
+        description="Run ASR inference (decoding) using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech/LibriTTS-formatted dataset. NOTE1: Script is updated with LibriTTS support, but must provide a '--libritts' flag. NOTE2: Script is updated to use both wav2vec2 ASR models from torchaudio library and custom fairseq/flashlight models.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
                         help="Path to a folder in Librispeech/LibriTTS format, can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders, or a leaf folder containing audio and a transcript file. Defaults to CWD if not provided.")
+    parser.add_argument("--model_path", type=str, default='',
+                        help="Path of a finetuned wav2vec2 model's .pt file")
+    parser.add_argument("--vocab_path", type=str, default='',
+                        help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning.")
+    parser.add_argument("--out_folder_name", type=str, default='wav2vec2_alignments',
+                    help="Name of the output folder, useful to differentiate runs.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified.")
+    parser.add_argument("--libritts", default=False, action='store_true',
+                        help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
     parser.add_argument("--save_figs", default=False, action='store_true',
                         help="Flag used to specify whether graphs of alignments are saved for each audio file. Defaults to False if flag is not provided.")
     parser.add_argument("--save_audio", default=False, action='store_true',
                         help="Flag used to specify whether detected words are saved as audio snippets. Defaults to False if flag is not provided.")
-    parser.add_argument("--libritts", default=False, action='store_true',
-                        help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
+
     
     # parse command line arguments
     global args
     args = parser.parse_args()
     
     # setup folder structure variables
-    global out_dir
-    out_dir = "wav2vec2_alignments" # the output folder to be created in folders where there are audio files and a transcript file
+    global out_dir, W2V2_ALIGNS_PREFIX
+    W2V2_ALIGNS_PREFIX = "W2V2_ALIGNS_"
+    out_dir = W2V2_ALIGNS_PREFIX + args.out_folder_name # the output folder to be created in folders where there are audio files and a transcript file
 
     # setup logging to both console and logfile
-    utils.setup_logging(args.folder, 'wav2vec2_forced_alignment_librispeech.log', console=True)
+    utils.setup_logging(args.folder, 'wav2vec2_forced_alignment_libri.log', console=True)
 
     # setup directory traversal mode variables
     mode = args.mode
