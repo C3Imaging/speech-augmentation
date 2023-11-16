@@ -2,6 +2,8 @@
 # Wav2Vec2 model is used for acoustic feature extraction
 # based on the tutorial: https://pytorch.org/audio/stable/tutorials/forced_alignment_tutorial.html
 
+# for more detailed explanation on how forced-alignment works: https://nvidia.github.io/NeMo/blogs/2023/2023-08-forced-alignment/
+
 import os
 import sys
 import time
