@@ -10,7 +10,7 @@ This repository provides the open-source scripts used for multi-speaker adult au
 
 The main functionalities for the augmentation pipeline can be broken down into the following scripts:<br />
 - [**Compute_librispeech_cmukids_similarities.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/Compute_librispeech_cmukids_similarities.py): computes the cosine similarity between adult speakers' embedding averaged over all utterances for that speaker to the average child speaker from the CMU kids multi-speaker audio dataset. The [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) library is used here.
-- [**forced_alignment_librispeech.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/forced_alignment_librispeech.py): runs forced alignment on Librispeech speakers using wav2vec2.0 ASR model and the Trellis matrix backtracking traversal algorithm to predict timestamps for words in the audio dataset. **NOTE:** transcript files for the audio data are required. The [torchaudio](https://pytorch.org/audio/stable/index.html) library is used here.
+- [**forced_alignment_librispeech.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/wav2vec2_forced_alignment_libri.py): runs forced alignment on Librispeech speakers using wav2vec2.0 ASR model and the Trellis matrix backtracking traversal algorithm to predict timestamps for words in the audio dataset. **NOTE:** transcript files for the audio data are required. The [torchaudio](https://pytorch.org/audio/stable/index.html) library is used here.
 - [**cleese_audio_augmentation.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/cleese_audio_augmentation.py): augments the pitch and time duration characteristics of original adult audio data from a multi-speaker dataset. The [CLEESE](https://github.com/neuro-team-femto/cleese) library is used here.
 
 ## Installation Requirements (UNIX)
@@ -48,7 +48,7 @@ We first run the **Compute_librispeech_cmukids_similarities.py** script on Libri
 
 ### Step 2: Generate Timestamps for Suitable Adult Speakers' Transcripts
 
-After selecting the suitable adult speakers according to Step 1, we run **forced_alignment_librispeech.py** on the new folder. This will populate the speaker folders with a subfolder that contains text files with time alignments (timestamps for the words in each transcript) for each audio file.
+After selecting the suitable adult speakers according to Step 1, we run **wav2vec2_forced_alignment_libri.py** on the new folder. This will populate the speaker folders with a subfolder that contains text files with time alignments (timestamps for the words in each transcript) for each audio file.
 
 ### Step 3: Generate Augmented Dataset
 
@@ -75,8 +75,9 @@ Future ASR models to be integrated with their own factories:<br />
 
 Forced alignment between paired text and audio data (a.k.a generating timestaps for the words in the text transcript) can be performed using ASR or TTS models.
 
-Current ASR models available:
+Current available ASR-based approaches`:
 - wav2vec2 (from torchaudio **AND** custom wav2vec2 models now supported): You can run `wav2vec2_forced_alignment_libri.py` (run `python wav2vec2_forced_alignment_libri.py --help` for a description of the usage) to generate time alignments for paired <text,audio> datasets whose transcripts are saved in LibriSpeech **OR** LibriTTS format.
+- whisper: You can generate transcripts with Whisper and time align the generated transcript with the speech file using Dynamic Time Warping (run `python whisper_forced_alignment.py --help` for a description of the usage).
 
 ## Speaker Diarization
 
