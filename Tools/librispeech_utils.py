@@ -32,6 +32,47 @@ def get_transcripts(filename):
     return transcripts
 
 
+def get_transcripts_from_w2v2_inference(filename):
+    """Returns a list of tuples, where tuples contain corresponding wavpath and transcript string from a 'hypothesis.txt' transcript file from the output of running 'wav2vec2_infer_custom.py'.
+
+    The format of the processed transcript strings is the one used by wav2vec2 forced alignment tutorial at https://pytorch.org/audio/stable/tutorials/forced_alignment_tutorial.html
+
+    Args:
+      filename (str):
+        The path to a hypothesis.txt transcript file outputted after running 'wav2vec2_infer_custom.py'.
+
+    Returns:
+      speech_files (str, list):
+        A sorted list of speech file paths.
+      transcripts (str, list):
+        A list of transcript strings corresponing to each speech file.
+    """
+    speech_files = []
+    transcripts = []
+    # read transcript file line by line
+    with open(filename) as f:
+        for line in f:
+            words = line.split(" ")
+            # remove id
+            del words[1]
+
+            wav_path = words[0].replace("(",'').replace(")",'')
+            # remove wavpath from the transcript
+            del words[0]
+
+            # remove \n from the last word
+            words[-1] = words[-1].replace("\n",'')
+
+
+
+            # join words using '|' symbol as wav2vec2 uses this symbol as the word boundary
+            words = '|'.join(words).upper()
+            speech_files.append(wav_path)
+            transcripts.append(words)
+
+    return speech_files, transcripts
+
+
 def get_speech_data_lists(dirpath, filenames):
     """Gets the speech audio files paths and the transcripts from a single leaf folder in Librispeech format.
 
@@ -55,7 +96,7 @@ def get_speech_data_lists(dirpath, filenames):
     for filename in filenames:
         if filename.endswith('.flac') or filename.endswith('.wav'):
             speech_files.append(os.path.join(dirpath, filename))
-        elif filename.endswith('trans.txt'):
+        elif filename.endswith('.txt'):
             transcript = os.path.join(dirpath, filename)
 
     # check if it is a leaf folder
@@ -64,3 +105,7 @@ def get_speech_data_lists(dirpath, filenames):
         speech_files.sort()
 
     return speech_files, transcripts
+
+
+if __name__ == "__main__":
+    get_transcripts_from_w2v2_inference("/workspace/datasets/LibriSpeech_test/w2v2_infer_out/hypothesis.txt")

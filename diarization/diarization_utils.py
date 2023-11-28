@@ -329,7 +329,7 @@ class ResemblyzerDiarizer(BaseDiarizer):
             minimum confidence threshold for considering a speech segment to be confidently spoken by a speaker.
         
         Returns:
-        speaker_segments (list, str):
+        speaker_segments (list str):
             most likely speaker ID per segment.
         """
         # a speaker per segment, 'none' if segment has similarity score below similarity_threshold for all known speakers.

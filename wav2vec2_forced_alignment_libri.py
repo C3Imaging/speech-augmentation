@@ -18,7 +18,7 @@ from Tools.decoding_utils import Wav2Vec2_Decoder_Factory
 
 
 
-def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
+def run_inference_batch(speech_files, transcripts):
     """Runs wav2vec2 batched inference on all audio files read from a leaf folder.
 
     The inference includes first generating the emission matrix by the wav2vec2 model, which contains the log probabilities of each label in the vocabulary for each time frame in the audio file.
@@ -36,8 +36,6 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
      into the output directory if the --save_audio flag is set.
 
     Args:
-      root_cur_out_dir (str):
-        The name of the output directory into which the alignments will be saved.
       speech_files (str, list):
         A sorted list of speech file paths found in this directory.
       transcripts (str, list):
@@ -46,19 +44,18 @@ def run_inference_batch(root_cur_out_dir, speech_files, transcripts):
     with torch.inference_mode():
         # loop through audio files
         for speech_filename, transcript in zip(speech_files, transcripts):            
-            # get speech segment index from the filename
-            if args.libritts:
-                speech_idx = speech_filename.split('.wav')[0].split('/')[-1]
-            else:
-                speech_idx = speech_filename.split('.flac')[0].split('-')[-1] if ".flac" in speech_filename else speech_filename.split('.wav')[0].split('-')[-1]
-            # create output subfolder for an audio file
-            cur_out_dir = os.path.join(root_cur_out_dir, speech_idx)
+            # create output subfolder for an audio file.
+            '/'.join(speech_filename.split('/')[:-1])
+            cur_out_dir = os.path.join('/'.join(speech_filename.split('/')[:-1]), out_dir)
+            if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
+            cur_out_dir = os.path.join(cur_out_dir, speech_filename.split('/')[-1].split(".flac")[0]) if ".flac" in speech_filename else os.path.join(cur_out_dir, speech_filename.split('/')[-1].split(".wav")[0])
             if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
 
             if args.model_path:
                 emissions = model.forward([speech_filename], device)
             else:
                 # generate the label class probability of each audio frame using wav2vec2 for each label (outputs are actually in logits, not probabilities)
+                waveform, _ = torchaudio.load(speech_filename)
                 emissions, _ = model(waveform.to(device))
                 emissions = torch.log_softmax(emissions, dim=-1) # probability in log domain to avoid numerical instability
             # probability of each vocabulary label at each time step
@@ -141,21 +138,20 @@ def run_inference():
     # if mode=root, run the script on all subfolders, essentially over the entire dataset
 
     for dirpath, _, filenames in os.walk(args.folder, topdown=asleaf): # if topdown=True, read contents of folder before subfolders, otherwise the reverse logic applies
-        # if this script was run previously, an output folder will be present in the folder where the audio files we want to process are, skip it and its subfolders
-        if W2V2_ALIGNS_PREFIX not in dirpath:
+        # process only folders that contain audio files or a hypothesis.txt file from custom wav2vec2 inference.      
+        test = ' '.join(filenames)
+        if ".wav" in test or ".flac" in test or "hypothesis.txt" in test:
             # get list of speech files and corresponding transcripts from a single folder
-            if args.libritts:
+            if args.w2v2_infer_custom:
+                speech_files, transcripts = librispeech_utils.get_transcripts_from_w2v2_inference(os.path.join(dirpath, "hypothesis.txt"))
+            elif args.libritts:
                 speech_files, transcripts = libritts_utils.get_speech_data_lists(dirpath, filenames)
             else:
                 speech_files, transcripts = librispeech_utils.get_speech_data_lists(dirpath, filenames)
-            # process only those folders that contain a transcripts text file
-            if transcripts is not None:
+            # process only those folders that contain transcripts file(s) and speech file(s)
+            if transcripts is not None and speech_files:
                 logging.info(f"starting to process folder {dirpath}")
-                # create root output dir (specified by global out_dir)
-                cur_out_dir = os.path.join(dirpath, out_dir)
-                if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
-                # run wav2vec2
-                run_inference_batch(cur_out_dir, speech_files, transcripts)
+                run_inference_batch(speech_files, transcripts)
                 logging.info(f"finished processing folder {dirpath}")
             if asleaf:
                 break # to prevent reading subfolders
@@ -192,21 +188,23 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run ASR inference (decoding) using wav2vec2 ASR model and perform forced alignment on folder(s) in the Librispeech/LibriTTS-formatted dataset. NOTE1: Script is updated with LibriTTS support, but must provide a '--libritts' flag. NOTE2: Script is updated to use both wav2vec2 ASR models from torchaudio library and custom fairseq/flashlight models.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
-                        help="Path to a folder in Librispeech/LibriTTS format, can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders, or a leaf folder containing audio and a transcript file. Defaults to CWD if not provided.")
+                        help="Path to a folder in Librispeech/LibriTTS format, can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders, or a leaf folder containing audio and a transcript file. Or can be a path to the output folder creataed by 'wav2vec2_infer_custom.py'. Defaults to CWD if not provided.")
     parser.add_argument("--model_path", type=str, default='',
-                        help="Path of a finetuned wav2vec2 model's .pt file")
+                        help="Path of a finetuned wav2vec2 model's .pt file. If unspecified, by default the script will use WAV2VEC2_ASR_LARGE_LV60K_960H torchaudio w2v2 model.")
     parser.add_argument("--vocab_path", type=str, default='',
                         help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning.")
     parser.add_argument("--out_folder_name", type=str, default='wav2vec2_alignments',
-                    help="Name of the output folder, useful to differentiate runs.")
+                    help="Name of the output folder, useful to differentiate runs. Defaults to 'wav2vec2_alignments'.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified.")
     parser.add_argument("--libritts", default=False, action='store_true',
                         help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
+    parser.add_argument("--w2v2_infer_custom", default=False, action='store_true',
+                    help="Flag used to specify whether the 'folder' is the result of running the wav2vec2 inference script 'wav2vec2_infer_custom.py'. Defaults to False (i.e. assumes 'folder' is a Librispeech or LibriTTS formatted dataset) if flag is not provided.")
     parser.add_argument("--save_figs", default=False, action='store_true',
                         help="Flag used to specify whether graphs of alignments are saved for each audio file. Defaults to False if flag is not provided.")
     parser.add_argument("--save_audio", default=False, action='store_true',
-                        help="Flag used to specify whether detected words are saved as audio snippets. Defaults to False if flag is not provided.")
+                        help="Flag used to specify whether detected words are saved as separate audio snippet files. Defaults to False if flag is not provided.")
 
     
     # parse command line arguments
@@ -214,8 +212,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # setup folder structure variables
-    global out_dir, W2V2_ALIGNS_PREFIX
     W2V2_ALIGNS_PREFIX = "W2V2_ALIGNS_"
+    global out_dir
     out_dir = W2V2_ALIGNS_PREFIX + args.out_folder_name # the output folder to be created in folders where there are audio files and a transcript file
 
     # setup logging to both console and logfile

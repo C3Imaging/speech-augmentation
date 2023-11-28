@@ -13,27 +13,21 @@ from Tools import utils
 import whisper_timestamped as whisper
 
 
-def run_inference_batch(root_cur_out_dir, speech_files):
+def run_inference_batch(speech_files):
     """Runs whisper inference on all audio files read from a leaf folder.
 
     Args:
-      root_cur_out_dir (str):
-        The name of the output directory into which the alignments will be saved.
       speech_files (str, list):
         A sorted list of speech file paths found in this directory.
     """
     with torch.inference_mode():
         # loop through audio files
-        for speech_filename in speech_files:            
-            # get speech segment index from the filename
-            if ".wav" in speech_filename:
-                speech_idx = speech_filename.split('.wav')[0].split('/')[-1]
-            elif ".flac" in speech_filename:
-                speech_idx = speech_filename.split('.flac')[0].split('/')[-1]
-            else:
-                speech_idx = speech_filename.split('.mp3')[0].split('/')[-1]
-            # create output subfolder for an audio file
-            cur_out_dir = os.path.join(root_cur_out_dir, speech_idx)
+        for speech_filename in speech_files:  
+            # create output subfolder for an audio file.
+            '/'.join(speech_filename.split('/')[:-1])
+            cur_out_dir = os.path.join('/'.join(speech_filename.split('/')[:-1]), out_dir)
+            if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
+            cur_out_dir = os.path.join(cur_out_dir, speech_filename.split('/')[-1].split(".flac")[0]) if ".flac" in speech_filename else os.path.join(cur_out_dir, speech_filename.split('/')[-1].split(".wav")[0])
             if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
 
             audio = whisper.load_audio(speech_filename)
@@ -41,7 +35,6 @@ def run_inference_batch(root_cur_out_dir, speech_files):
             
             with open(os.path.join(cur_out_dir, 'alignments.txt'), 'w') as f:
                 f.write("confidence_score,word_label,start_time,stop_time\n") # time is in seconds
-                i = 0
                 # for each word detected, save to file the {confidence score, label, start time, stop time} as a CSV line
                 for word in result['segments'][0]['words']:
                     f.write(f"{word['confidence']:.2f},{word['text']},{word['start']:.2f},{word['end']:.2f}\n")
@@ -57,21 +50,22 @@ def run_inference():
     # if mode=root, run the script on all subfolders, essentially over the entire dataset
 
     for dirpath, _, filenames in os.walk(args.folder, topdown=asleaf): # if topdown=True, read contents of folder before subfolders, otherwise the reverse logic applies
-        # if this script was run previously, an output folder will be present in the folder where the audio files we want to process are, skip it and its subfolders
-        if WHISPER_ALIGNS_PREFIX not in dirpath:
-            # process only those folders that contain a audio files
-            audio_files = list(filter(lambda filepath: filepath.endswith('.flac') or filepath.endswith('.wav') or filepath.endswith('.mp3'), filenames))
-            audio_files = list(map(lambda filepath: os.path.join(dirpath, filepath), audio_files))
-            if audio_files:
-                logging.info(f"starting to process folder {dirpath}")
-                # create root output dir (specified by global out_dir)
-                cur_out_dir = os.path.join(dirpath, out_dir)
-                if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
-                # run whisper
-                run_inference_batch(cur_out_dir, audio_files)
-                logging.info(f"finished processing folder {dirpath}")
-            if asleaf:
-                break # to prevent reading subfolders
+        # process only those folders that contain a audio files.
+        audio_files = list(filter(lambda filepath: filepath.endswith('.flac') or filepath.endswith('.wav') or filepath.endswith('.mp3'), filenames))
+        # get absolute paths for files.
+        audio_files = list(map(lambda filepath: os.path.join(dirpath, filepath), audio_files))
+        # filter out any undesired files.
+        if args.path_filters:
+            for path_filter in args.path_filters:
+                audio_files = [filepath for filepath in audio_files if path_filter not in filepath]
+        
+        if audio_files:
+            logging.info(f"starting to process folder {dirpath}")
+            # run whisper
+            run_inference_batch(audio_files)
+            logging.info(f"finished processing folder {dirpath}")
+        if asleaf:
+            break # to prevent reading subfolders
 
 
 def main():
@@ -92,17 +86,19 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default='',
                         help="Path of a huggingface cloud-hosted Whisper model.")
     parser.add_argument("--out_folder_name", type=str, default='whisper_alignments',
-                    help="Name of the output folder, useful to differentiate runs.")
+                    help="Name of the output folder, useful to differentiate runs. Defaults to 'whisper_alignments'.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified.")
+    parser.add_argument("--path_filters", type=str, nargs='+', default='',
+                    help="List of keywords to filter the paths to audio files in the 'folder' directory. Will filter out any auidio files that have those keywords present anywhere in their absolute path.")
 
     # parse command line arguments
     global args
     args = parser.parse_args()
     
     # setup folder structure variables
-    global out_dir, WHISPER_ALIGNS_PREFIX
     WHISPER_ALIGNS_PREFIX = "WHISPER_ALIGNS_"
+    global out_dir
     out_dir = WHISPER_ALIGNS_PREFIX + args.out_folder_name # the output folder to be created in folders where there are audio files and a transcript file
 
     # setup logging to both console and logfile

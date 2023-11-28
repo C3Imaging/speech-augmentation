@@ -16,8 +16,8 @@ def main(args):
     
     # get accompanying ground truth transcripts files.
     gt_tr_paths = list(map(lambda x: str(x), list(Path(args.in_dir).glob("**/*.txt"))))
-    # filter out vocab file, hypothesis.txt file, and reference.txt file.
-    gt_tr_paths = list(filter(lambda x: not ("dict" in x or "hypothesis" in x or "reference" in x), gt_tr_paths))
+    # filter out vocab file, hypothesis.txt file, reference.txt and any alignments.txt files.
+    gt_tr_paths = list(filter(lambda x: not ("dict" in x or "hypothesis" in x or "reference" in x or "alignment" in x), gt_tr_paths))
     # filter out any undesired wav files' corresponding transcripts files.
     if args.path_filters:
         for fil in args.path_filters:
@@ -59,7 +59,7 @@ def main(args):
             temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
             temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
             id = '/'.join(temp)
-            hyp_file.write(f"{hyp} ({id})\n")
+            hyp_file.write(f"({wav_path}) ({id}) {hyp}\n")
     # if there are ground truth transcripts accompanying the audio files, populate reference.txt
     if len(gt_tr_paths):
         with open(os.path.join(args.out_dir, "reference.txt"), 'w') as ref_file:
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", type=str, required=True,
                         help="Path to a new output folder to create that will contain a file (hypothesis.txt) holding the generated transcripts and optionally a ground truth transcripts file (reference.txt)")
     parser.add_argument("--model_path", type=str, default='',
-                        help="Path of a finetuned wav2vec2 model's .pt file")
+                        help="Path of a finetuned wav2vec2 model's .pt file. If unspecified, by default the script will use WAV2VEC2_ASR_LARGE_LV60K_960H torchaudio w2v2 model.")
     parser.add_argument("--vocab_path", type=str, default='',
                         help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning.")
     parser.add_argument("--batch_size", type=int, default=1,
