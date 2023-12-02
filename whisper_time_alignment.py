@@ -7,8 +7,10 @@ import os
 import sys
 import time
 import torch
+import string
 import logging
 import argparse
+from tqdm import tqdm
 from Tools import utils
 import whisper_timestamped as whisper
 
@@ -22,7 +24,8 @@ def run_inference_batch(speech_files):
     """
     with torch.inference_mode():
         # loop through audio files
-        for speech_filename in speech_files:  
+        for speech_filename in tqdm(speech_files, total=len(speech_files), unit=" audio files", desc=f"processing audio files in folder, so far"):
+            logging.info(f"processing audio file {speech_filename}")
             # create output subfolder for an audio file.
             '/'.join(speech_filename.split('/')[:-1])
             cur_out_dir = os.path.join('/'.join(speech_filename.split('/')[:-1]), out_dir)
@@ -31,13 +34,35 @@ def run_inference_batch(speech_files):
             if not os.path.exists(cur_out_dir): os.makedirs(cur_out_dir, exist_ok=True)
 
             audio = whisper.load_audio(speech_filename)
-            result = whisper.transcribe(model, audio, beam_size=5, best_of=5, temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0))
+            # return all hypotheses from beam search ranked from most likely as index 0 to least likely as index -1.
+            results = whisper.transcribe(model, audio, beam_size=args.beam_size, best_of=5, temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0))
             
-            with open(os.path.join(cur_out_dir, 'alignments.txt'), 'w') as f:
-                f.write("confidence_score,word_label,start_time,stop_time\n") # time is in seconds
-                # for each word detected, save to file the {confidence score, label, start time, stop time} as a CSV line
-                for word in result['segments'][0]['words']:
-                    f.write(f"{word['confidence']:.2f},{word['text']},{word['start']:.2f},{word['end']:.2f}\n")
+            if not args.all_hypotheses:
+            # only save the best hypothesis to file.
+                with open(os.path.join(cur_out_dir, f"alignments_beamsearch_best.txt"), 'w') as f:
+                    segments = results[0]['segments'] if type(results) == list else results['segments']
+                    f.write("confidence_score,word_label,start_time,stop_time\n") # time is in seconds
+                    for segment in segments:
+                        # for each word, save to file the {confidence score, word label, start time, stop time} as a CSV line
+                        for word in segment['words']:
+                            # remove punctuation and convert to lower case
+                            stripped_text = word['text'].translate(str.maketrans('', '', string.punctuation)).lower()
+                            f.write(f"{word['confidence']:.2f},{stripped_text},{word['start']:.2f},{word['end']:.2f}\n")
+            # save all hypotheses to files.
+            else:
+                try:
+                    for i in range(len(results)):
+                        with open(os.path.join(cur_out_dir, f"alignments_beamsearch_{i+1}_of_{len(results)}.txt"), 'w') as f:
+                            f.write("confidence_score,word_label,start_time,stop_time\n") # time is in seconds
+                            for segment in results[i]['segments']:
+                                # for each word, save to file the {confidence score, word label, start time, stop time} as a CSV line
+                                for word in segment['words']:
+                                    # remove punctuation and convert to lower case
+                                    stripped_text = word['text'].translate(str.maketrans('', '', string.punctuation)).lower()
+                                    f.write(f"{word['confidence']:.2f},{stripped_text},{word['start']:.2f},{word['end']:.2f}\n")
+                except KeyError:
+                    logging.error("Cannot return multiple hypotheses because the original 'whisper' and 'whisper-timestamped' libraries do not provide this functionality. Need to manually edit libraries' implementations -> Please use forked code from https://github.com/abarcovschi/whisper-fork and https://github.com/abarcovschi/whisper-timestamped-fork to make this script work with the '--all_hypotheses' flag.")
+                    sys.exit(1)
 
 
 def run_inference():
@@ -85,12 +110,16 @@ if __name__ == "__main__":
                         help="Path to a folder containing audio files to transcribe and align. Defaults to CWD if not provided.")
     parser.add_argument("--model_path", type=str, default='',
                         help="Path of a huggingface cloud-hosted Whisper model.")
+    parser.add_argument("--beam_size", type=int, default=1,
+                        help="Length of beam for beam search decoding. Defaults to 5 (consistent with Whisper paper).")
     parser.add_argument("--out_folder_name", type=str, default='whisper_alignments',
-                    help="Name of the output folder, useful to differentiate runs. Defaults to 'whisper_alignments'.")
+                        help="Name of the output folder, useful to differentiate runs. Defaults to 'whisper_alignments'.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified.")
+    parser.add_argument("--all_hypotheses", default=False, action='store_true',
+                        help="Flag used to specify whether to save all hypotheses returned by beam search decoding. Defaults to False if flag is not provided (i.e. returns just the top hypothesis).")
     parser.add_argument("--path_filters", type=str, nargs='+', default='',
-                    help="List of keywords to filter the paths to audio files in the 'folder' directory. Will filter out any auidio files that have those keywords present anywhere in their absolute path.")
+                        help="List of keywords to filter the paths to audio files in the 'folder' directory. Will filter out any auidio files that have those keywords present anywhere in their absolute path.")
 
     # parse command line arguments
     global args
