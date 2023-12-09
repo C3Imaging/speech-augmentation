@@ -117,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified.")
     parser.add_argument("--all_hypotheses", default=False, action='store_true',
-                        help="Flag used to specify whether to save all hypotheses returned by beam search decoding. Defaults to False if flag is not provided (i.e. returns just the top hypothesis).")
+                        help="Flag used to specify whether to save all hypotheses (N=--beam_size) returned by beam search decoding. Defaults to False if flag is not provided (i.e. returns just the best hypothesis).")
     parser.add_argument("--path_filters", type=str, nargs='+', default='',
                         help="List of keywords to filter the paths to audio files in the 'folder' directory. Will filter out any auidio files that have those keywords present anywhere in their absolute path.")
 

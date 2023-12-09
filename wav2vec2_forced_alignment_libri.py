@@ -13,9 +13,8 @@ import argparse
 import torchaudio
 import matplotlib
 import matplotlib.pyplot as plt
-from Tools import utils, forced_alignment_utils, librispeech_utils, libritts_utils
 from Tools.decoding_utils import Wav2Vec2_Decoder_Factory
-
+from Tools import utils, forced_alignment_utils, librispeech_utils, libritts_utils
 
 
 def run_inference_batch(speech_files, transcripts):
@@ -194,13 +193,13 @@ if __name__ == "__main__":
     parser.add_argument("--vocab_path", type=str, default='',
                         help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning.")
     parser.add_argument("--out_folder_name", type=str, default='wav2vec2_alignments',
-                    help="Name of the output folder, useful to differentiate runs. Defaults to 'wav2vec2_alignments'.")
+                        help="Name of the output folder, useful to differentiate runs. Defaults to 'wav2vec2_alignments'.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified.")
     parser.add_argument("--libritts", default=False, action='store_true',
                         help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided.")
     parser.add_argument("--w2v2_infer_custom", default=False, action='store_true',
-                    help="Flag used to specify whether the 'folder' is the result of running the wav2vec2 inference script 'wav2vec2_infer_custom.py'. Defaults to False (i.e. assumes 'folder' is a Librispeech or LibriTTS formatted dataset) if flag is not provided.")
+                        help="Flag used to specify whether the 'folder' is the result of running the wav2vec2 inference script 'wav2vec2_infer_custom.py'. Defaults to False (i.e. assumes 'folder' is a Librispeech or LibriTTS formatted dataset) if flag is not provided.")
     parser.add_argument("--save_figs", default=False, action='store_true',
                         help="Flag used to specify whether graphs of alignments are saved for each audio file. Defaults to False if flag is not provided.")
     parser.add_argument("--save_audio", default=False, action='store_true',

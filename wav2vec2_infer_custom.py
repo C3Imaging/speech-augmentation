@@ -1,9 +1,10 @@
 
 import os
+import json
 import argparse
 from Tools import utils
 from pathlib import Path
-from Tools.decoding_utils import Wav2Vec2_Decoder_Factory
+from Tools.decoding_utils import Wav2Vec2_Decoder_Factory, normalize_timestamp_output, ViterbiDecoder, GreedyDecoder
 
 
 def main(args):
@@ -14,10 +15,10 @@ def main(args):
         for fil in args.path_filters:
             wav_paths = [w for w in wav_paths if fil not in w]
     
-    # get accompanying ground truth transcripts files.
+    # get accompanying ground truth transcripts files, if they exist.
     gt_tr_paths = list(map(lambda x: str(x), list(Path(args.in_dir).glob("**/*.txt"))))
     # filter out vocab file, hypothesis.txt file, reference.txt and any alignments.txt files.
-    gt_tr_paths = list(filter(lambda x: not ("dict" in x or "hypothesis" in x or "reference" in x or "alignment" in x), gt_tr_paths))
+    gt_tr_paths = list(filter(lambda x: not ("dict" in x or "hypothesis" in x or "hypotheses" in x or "reference" in x or "alignment" in x), gt_tr_paths))
     # filter out any undesired wav files' corresponding transcripts files.
     if args.path_filters:
         for fil in args.path_filters:
@@ -25,41 +26,60 @@ def main(args):
     wav_paths.sort()
     gt_tr_paths.sort()
 
-    # # DEBUG CODE: find unmatching <wav,txt> files pairs
-    # wavs_train = list(Path(args.in_dir).glob("kids_train/*.wav"))
-    # wavs_test = list(Path(args.in_dir).glob("kids_test/*.wav"))
-    # trs_train = list(Path(args.in_dir).glob("kids_train/*.txt"))
-    # trs_test = list(Path(args.in_dir).glob("kids_test/*.txt"))
-    # wavs_train_ids = [f.split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wavs_train]
-    # trs_train_ids = [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in trs_train]
-    # missing_from_wavs = list(sorted(set(trs_train_ids) - set(wavs_train_ids)))
-
-    # if there are transcript files:
+    # if there are ground truth transcript files:
     if gt_tr_paths:
         assert [f.split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wav_paths] == [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in gt_tr_paths], "number of and order of must be the same for audio and text filenames."
 
-    # create output dir if it doesnt exist.
+    # create output dir for inference results, if it doesn't exist.
     if not os.path.exists(args.out_dir): os.makedirs(args.out_dir, exist_ok=True)
 
     # create model + decoder pair (change manually).
     if args.model_path:
-        # asr = Wav2Vec2_Decoder_Factory.get_args_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path)
-        asr = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=args.model_path, vocab_path=args.vocab_path)
+        # asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_fairseq(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
+        asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
+        # asr = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
     else:
-        # default to torchaudio wav2vec2 model if not using a custom .pt checkpoint.
-        asr = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy()
+        # default to a torchaudio wav2vec2 model if not using a custom .pt checkpoint.
+        asr = Wav2Vec2_Decoder_Factory.get_torchaudio_beamsearch(num_hyps=args.num_hyps, time_aligns=args.time_aligns)
+        # asr = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy(num_hyps=args.num_hyps, time_aligns=args.time_aligns)
 
     # run ASR inference and decode into predicted hypothesis transcripts.
     hypos = asr.infer(wav_paths, batch_size=args.batch_size)
 
-    # populate hypothesis.txt
-    with open(os.path.join(args.out_dir, "hypothesis.txt"), 'w') as hyp_file:
-        for hyp, wav_path in zip(hypos, wav_paths):
-            # create unique id of audio sample by including leaf folder in the id.
-            temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
-            temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
-            id = '/'.join(temp)
-            hyp_file.write(f"({wav_path}) ({id}) {hyp}\n")
+    # populate best_hypotheses.txt file (if num_hyps=1) or hypothesesX_of_N.txt files (if num_hyps > 1).
+    # GreedyDecoder and ViterbiDecoder ignore args.num_hyps.
+    # GreedyDecoder ignores args.time_aligns.
+    if args.num_hyps > 1 and not isinstance(asr.decoder, (ViterbiDecoder, GreedyDecoder)):
+         # save all hypotheses to files.
+        for all_hyps, wav_path in zip(hypos, wav_paths):
+            for i in range(len(all_hyps)):
+                with open(os.path.join(args.out_dir, f"hypotheses{i+1}_of_{len(all_hyps)}.txt"), 'a') as hyp_file:
+                    # create unique id of audio sample by including leaf folder in the id.
+                    temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
+                    temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
+                    id = '/'.join(temp)
+                    item = dict()
+                    item['wav_path'] = wav_path
+                    item['id'] = id
+                    item['pred_txt'] = all_hyps[i]['pred_txt']
+                    if args.time_aligns:
+                        item['timestamps_word'] =  all_hyps[i]['timestamps_word']
+                    hyp_file.write(json.dumps(item) + "\n")
+    else:
+        with open(os.path.join(args.out_dir, "best_hypothesis.txt"), 'w') as hyp_file:
+            for hyp, wav_path in zip(hypos, wav_paths):
+                # create unique id of audio sample by including leaf folder in the id.
+                temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
+                temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
+                id = '/'.join(temp)
+                item = dict()
+                item['wav_path'] = wav_path
+                item['id'] = id
+                item['pred_txt'] = hyp['pred_txt']
+                if args.time_aligns and not isinstance(asr.decoder, GreedyDecoder):
+                    item['timestamps_word'] = hyp['timestamps_word']
+                hyp_file.write(json.dumps(item) + "\n")
+
     # if there are ground truth transcripts accompanying the audio files, populate reference.txt
     if len(gt_tr_paths):
         with open(os.path.join(args.out_dir, "reference.txt"), 'w') as ref_file:
@@ -86,14 +106,24 @@ if __name__ == "__main__":
     parser.add_argument("--vocab_path", type=str, default='',
                         help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning.")
     parser.add_argument("--batch_size", type=int, default=1,
-                        help="Minibatch size for inference. defaults to 1 (sequential processing)")
+                        help="Minibatch size for inference. defaults to 1 (sequential processing). NOTE: decoding is always done sequentially, only ASR inference can be batched.")
+    parser.add_argument("--num_hyps", type=int, default=1,
+                        help="The number of best hypotheses to be returned by beam search decoding (if using beam search decoder) for an audio file. Defaults to 1 (i.e. returns just the best hypothesis). NOTE: this does not change beam size of decoder!")
+    parser.add_argument("--time_aligns", default=False, action='store_true',
+                        help="Flag used to specify whether to save word-level time alignment information along with the transcript for the hypothesis/hypotheses. Defaults to False if flag is not provided.")
     parser.add_argument("--path_filters", type=str, nargs='+', default='',
                         help="List of keywords to filter the paths to wav files in the --in_dir directory. Will filter out any wav files that have those keywords present anywhere in their absolute path.")
 
-    # parse command line arguments
+    # parse command line arguments.
     args = parser.parse_args()
 
-    # setup logging to both console and logfile
+    # check arg vals if in allowable range.
+    if args.batch_size < 1:
+        raise ValueError("'batch_size' should be a value >= 1 !!!")
+    if args.num_hyps < 1:
+        raise ValueError("'num_hyps' should be a value >= 1 !!!")
+
+    # setup logging to both console and logfile.
     utils.setup_logging(args.out_dir, 'wav2vec2_infer_custom.log', console=True, filemode='w')
 
     p = utils.Profiler()
