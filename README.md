@@ -73,15 +73,49 @@ Future ASR models to be integrated with their own factories:<br />
 
 ## Time Aligned Predictions and Forced Alignment
 
-Forced alignment between paired text and audio data (a.k.a generating timestaps for the words in the text transcript) can be performed using ASR or TTS models.
-Generating time alignment information for predictions is also possible.
+Generating time alignment information for predictions is possible. Also, forced alignment between paired text and audio data (a.k.a aligning **known** text transcript with audio file) can be performed using ASR or TTS models.
 
-Current available ASR-based approaches`:
-- **Wav2Vec2 forced alignment approach** (**NOTE:** models from torchaudio **AND** custom wav2vec2 models now supported): You can run `wav2vec2_forced_alignment_libri.py` (run `python wav2vec2_forced_alignment_libri.py --help` for a description of the usage) to generate time alignments for paired <text,audio> datasets whose transcripts are saved in LibriSpeech **OR** LibriTTS format.
-- **Whisper time alignment approach:** You can generate transcripts with Whisper and time align the generated transcript with the speech file using Dynamic Time Warping (run `python whisper_time_alignment.py --help` for a description of the usage).<br />
-**UPDATE:** By changing the source code of [openai/whisper's decoding.py](https://github.com/openai/whisper/blob/main/whisper/decoding.py), [openai/whisper's transcribe.py](https://github.com/openai/whisper/blob/main/whisper/transcribe.py) and [linto-ai/whisper-timestamped's transcribe.py](https://github.com/linto-ai/whisper-timestamped/blob/master/whisper_timestamped/transcribe.py) to those in the [openai/whisper forked](https://github.com/abarcovschi/whisper-fork) and [linto-ai/whisper-timestamped forked](https://github.com/abarcovschi/whisper-timestamped-fork) repositories, multiple hypotheses can be returned from beam search decoding, instead of the default best hypothesis offered by the original projects.
-- **Time alignment with NeMo models project:** You can generate transcripts with NeMo-based ASR models, such as Conformer-CTC, Conformer-Transducer, Hybrid FastFormer etc. and generate char and word-level time alignment information for the generated transcripts. This requires installing the NeMo framework. Please see the [**NeMo ASR Experiments**](https://github.com/abarcovschi/nemo_asr/blob/main/README.md#generating-time-alignments-for-transcriptions) project for more details.<br />
-**UPDATE:** By using [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py) multiple hypotheses can also be returned from beam search decoding, instead of the default best hypothesis offered by the original project. 
+Current available ASR-based approaches:
+- **Wav2Vec2 time alignment approach:** The script `wav2vec2_infer_custom.py` can be used to create word-level time aligned transcripts using wav2vec2 models **both** from the torchaudio library or from a custom trained/finetuned checkpoint using the [fairseq framework](https://github.com/facebookresearch/fairseq).<br /><br />
+Run `python wav2vec2_infer_custom.py --help` for a description of the usage.<br /><br />
+There are multiple ASR model + Decoder options available:
+  - Torchaudio Wav2Vec2 model + Greedy Decoder from torchaudio (multiple hypotheses and word-level timestamps unavailable);
+  - Torchaudio Wav2Vec2 model + lexicon-free Beam Search Decoder without external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - Torchaudio Wav2Vec2 model + lexicon-based Beam Search Decoder with KenLM external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - Wav2Vec2 model checkpoint trained using fairseq framework + Viterbi Decoder from fairseq (multiple hypotheses unavailable, word-level timestamps available);
+  - Wav2Vec2 model checkpoint trained using fairseq framework + Greedy Decoder from torchaudio (multiple hypotheses and word-level timestamps unavailable);
+  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-free Beam Search Decoder without external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with KenLM external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with KenLM external language model from fairseq (multiple hypotheses and word-level timestamps available);
+  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with neural Transformer-based external language model from fairseq (multiple hypotheses and word-level timestamps available).<br /><br />
+ **NOTE:** By changing the source code of [fairseq/examples/speech_recognition/w2l_decoder.py](https://github.com/facebookresearch/fairseq/blob/main/examples/speech_recognition/w2l_decoder.py) to that in [fairseq forked](https://github.com/abarcovschi/fairseq-fork/blob/main/examples/speech_recognition/w2l_decoder.py), word-level timestamps can be returned from **all** the decoders in this file (W2lViterbiDecoder, W2lKenLMDecoder, W2lFairseqLMDecoder).<br /><br />
+- **Wav2Vec2 forced alignment approach** (**NOTE:** models from torchaudio **AND** custom wav2vec2 models checkpoints trained/finetuned using the fairseq framework are now supported): You can run `wav2vec2_forced_alignment_libri.py` (run `python wav2vec2_forced_alignment_libri.py --help` for a description of the usage) to generate time alignments for paired <text,audio> datasets whose transcripts are saved in LibriSpeech **OR** LibriTTS format.<br /><br />
+- **Whisper time alignment approach:** You can generate transcripts with Whisper and time align the generated transcript with the speech file using Dynamic Time Warping (run `python whisper_time_alignment.py --help` for a description of the usage).<br /><br />
+**UPDATE:** By changing the source code of [openai/whisper/decoding.py](https://github.com/openai/whisper/blob/main/whisper/decoding.py), [openai/whisper/transcribe.py](https://github.com/openai/whisper/blob/main/whisper/transcribe.py) and [linto-ai/whisper-timestamped/transcribe.py](https://github.com/linto-ai/whisper-timestamped/blob/master/whisper_timestamped/transcribe.py) to those in the [openai/whisper forked](https://github.com/abarcovschi/whisper-fork) and [linto-ai/whisper-timestamped forked](https://github.com/abarcovschi/whisper-timestamped-fork) repositories, multiple hypotheses can be returned from beam search decoding, instead of the default best hypothesis offered by the original projects.<br /><br />
+- **Time alignment with NeMo models project:** You can generate transcripts with NeMo-based ASR models, such as Conformer-CTC, Conformer-Transducer, Hybrid FastFormer etc. and generate char and word-level time alignment information for the generated transcripts. This requires installing the NeMo framework. Please see the [**NeMo ASR Experiments**](https://github.com/abarcovschi/nemo_asr/blob/main/README.md#generating-time-alignments-for-transcriptions) project for more details.<br /><br />
+**UPDATE:** By using [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py), multiple hypotheses can also be returned from beam search decoding, instead of the default best hypothesis offered by the original project's [NeMo/examples/asr/transcribe_speech.py](https://github.com/NVIDIA/NeMo/blob/main/examples/asr/transcribe_speech.py).
+<br /><br />
+
+### Output Format
+
+The format of JSON files containing word-level time-aligned transcripts, outputted by `wav2vec2_infer_custom.py` and `whisper_time_alignment.py`, is the following:<br /><br />
+```json
+{"wav_path": "/path/to/audio1.wav", "id": "unique/audio1/id", "pred_txt": "the predicted transcript sentence for audio one", "timestamps_word": [{"word": "the", "start_time": 0.1, "end_time": 0.2}, {"word": "predicted", "start_time": 0.3, "end_time": 0.4}, {"word": "transcript", "start_time": 0.5, "end_time": 0.6}, {"word": "sentence", "start_time": 0.7, "end_time": 0.8}, {"word": "for", "start_time": 0.9, "end_time": 1.0}, {"word": "audio", "start_time": 1.1, "end_time": 1.2}, {"word": "one", "start_time": 1.3, "end_time": 1.4}]}
+{"wav_path": "/path/to/audio2.wav", "id": "unique/audio2/id", "pred_txt": "the predicted transcript sentence for audio two", "timestamps_word": [{"word": "the", "start_time": 0.1, "end_time": 0.2}, {"word": "predicted", "start_time": 0.3, "end_time": 0.4}, {"word": "transcript", "start_time": 0.5, "end_time": 0.6}, {"word": "sentence", "start_time": 0.7, "end_time": 0.8}, {"word": "for", "start_time": 0.9, "end_time": 1.0}, {"word": "audio", "start_time": 1.1, "end_time": 1.2}, {"word": "two", "start_time": 1.3, "end_time": 1.4}]}
+```
+etc.
+<br /><br />
+**NOTE1:** The 'timestamps_word' field is optionally outputted by decoders that support word-level timestamps creation **if** the `--time_aligns` flag is set using `wav2vec2_infer_custom.py`; and if the `--time_aligns` flag is set using `whisper_time_alignment.py`.<br /><br />
+**NOTE2:** If `--num_hyps` is set to a value >1 when using `wav2vec2_infer_custom.py`; and if `--beam_size` is set to a value >1 **along** with setting the `--all_hypotheses` flag when using `whisper_time_alignment.py`, then **multiple** output files will be created, e.g. if `--num_hyps`=3/`--beam_size`=3:<br />
+```
+hypotheses1_of_3.json -> contains the best hypothesis per audio file in the input folder.
+hypotheses2_of_3.json -> contains the second best hypothesis per audio file in the input folder.
+hypotheses3_of_3.json -> contains the third best hypothesis per audio file in the input folder.
+```
+files are created, with each file containing a JSON row (dict containing 'wav_path', 'id', 'pred_txt', ['timestamps_word'] fields) per audio file in the input folder.<br /><br />
+If `--num_hyps` is set to 1 when using `wav2vec2_infer_custom.py`, or if using a decoder that does not support returning multiple hypotheses; and if the `--all_hypotheses` flag is not provided when using `whisper_time_alignment.py`, then a **single** `best_hypothesis.json` file will be created, containing just the best hypothesis per audio file in the input folder.<br /><br />
+
+For the output format produced using NeMo models using the [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py) script, please see the [**NeMo ASR Experiments**](https://github.com/abarcovschi/nemo_asr/blob/main/README.md#generating-time-alignments-for-transcriptions) project (output is similar, but has character-level timestamps option also).
 
 ## Speaker Diarization
 
