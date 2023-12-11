@@ -30,9 +30,6 @@ def main(args):
     if gt_tr_paths:
         assert [f.split('/')[-1].split('.wav')[0].split('myst_')[-1] for f in wav_paths] == [f.split('/')[-1].split('.txt')[0].split('myst_')[-1] for f in gt_tr_paths], "number of and order of must be the same for audio and text filenames."
 
-    # create output dir for inference results, if it doesn't exist.
-    if not os.path.exists(args.out_dir): os.makedirs(args.out_dir, exist_ok=True)
-
     # create model + decoder pair (change manually).
     if args.model_path:
         # asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_fairseq(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
@@ -46,14 +43,14 @@ def main(args):
     # run ASR inference and decode into predicted hypothesis transcripts.
     hypos = asr.infer(wav_paths, batch_size=args.batch_size)
 
-    # populate best_hypotheses.txt file (if num_hyps=1) or hypothesesX_of_N.txt files (if num_hyps > 1).
+    # populate best_hypotheses.json file (if num_hyps=1) or hypothesesX_of_N.json files (if num_hyps > 1).
     # GreedyDecoder and ViterbiDecoder ignore args.num_hyps.
     # GreedyDecoder ignores args.time_aligns.
     if args.num_hyps > 1 and not isinstance(asr.decoder, (ViterbiDecoder, GreedyDecoder)):
          # save all hypotheses to files.
         for all_hyps, wav_path in zip(hypos, wav_paths):
             for i in range(len(all_hyps)):
-                with open(os.path.join(args.out_dir, f"hypotheses{i+1}_of_{len(all_hyps)}.txt"), 'a') as hyp_file:
+                with open(os.path.join(args.out_dir, f"hypotheses{i+1}_of_{len(all_hyps)}.json"), 'a') as hyp_file:
                     # create unique id of audio sample by including leaf folder in the id.
                     temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
                     temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
@@ -66,7 +63,7 @@ def main(args):
                         item['timestamps_word'] =  all_hyps[i]['timestamps_word']
                     hyp_file.write(json.dumps(item) + "\n")
     else:
-        with open(os.path.join(args.out_dir, "best_hypothesis.txt"), 'w') as hyp_file:
+        with open(os.path.join(args.out_dir, "best_hypotheses.json"), 'w') as hyp_file:
             for hyp, wav_path in zip(hypos, wav_paths):
                 # create unique id of audio sample by including leaf folder in the id.
                 temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
@@ -100,7 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("--in_dir", type=str, required=True,
                         help="Path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files.")
     parser.add_argument("--out_dir", type=str, required=True,
-                        help="Path to a new output folder to create that will contain a file (hypothesis.txt) holding the generated transcripts and optionally a ground truth transcripts file (reference.txt)")
+                        help="Path to a new output folder to create, where results will be saved.")
     parser.add_argument("--model_path", type=str, default='',
                         help="Path of a finetuned wav2vec2 model's .pt file. If unspecified, by default the script will use WAV2VEC2_ASR_LARGE_LV60K_960H torchaudio w2v2 model.")
     parser.add_argument("--vocab_path", type=str, default='',
@@ -119,9 +116,9 @@ if __name__ == "__main__":
 
     # check arg vals if in allowable range.
     if args.batch_size < 1:
-        raise ValueError("'batch_size' should be a value >= 1 !!!")
+        raise ValueError("'--batch_size' should be a value >= 1 !!!")
     if args.num_hyps < 1:
-        raise ValueError("'num_hyps' should be a value >= 1 !!!")
+        raise ValueError("'--num_hyps' should be a value >= 1 !!!")
 
     # setup logging to both console and logfile.
     utils.setup_logging(args.out_dir, 'wav2vec2_infer_custom.log', console=True, filemode='w')
