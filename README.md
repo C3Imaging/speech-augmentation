@@ -58,18 +58,22 @@ Using the dataset from Step 2, we run **cleese_audio_augmentation.py** to produc
 
 ## ASR Inference
 Current ASR models available:
-- wav2vec2 (fairseq framework): You can run `wav2vec2_infer_custom.py` (run `python wav2vec2_infer_custom.py --help` for a description of the usage) to generate hypothesis text transcripts from an unlabelled audio dataset.
-**NOTE:** You must manually specify the ASR pipeline you want to use in the code under the comment `# create model + decoder pair`. There are a number of possible combinations of ASR model + Decoder + [optional external Language Model] to choose from. Please see `decoding_utils/Wav2Vec2_Decoder_Factory` class for a list of the implemented pipelines.<br />
+- wav2vec2 ([fairseq](https://github.com/facebookresearch/fairseq) framework): You can run `wav2vec2_infer_custom.py` to generate hypothesis text transcripts from an unlabelled audio dataset.<br />
+Run `python wav2vec2_infer_custom.py --help` for a description of the usage.<br /><br />
+**NOTE:** You must manually specify the ASR pipeline you want to use in the code under the comment `# create model + decoder pair`. There are a number of possible combinations of ASR model + Decoder + [optional external Language Model] to choose from. Please see `decoding_utils/Wav2Vec2_Decoder_Factory` class for a list of the implemented pipelines.<br /><br />
 **Wav2Vec2 ASR Pipeline Notes:**
-  1. a wav2vec2 checkpoint file can have its arch defined in the **"args"** field or **"cfg"** field, depending on the version of the fairseq framework used to train the model. If you get an error using a "get_args_" function from the Wav2Vec2 factory class, the checkpoint is likely a **"cfg"** one, thus try using the "get_cfg_" equivalent function instead and vice versa).
+  1. a wav2vec2 checkpoint file can have its architecture defined in the **"args"** field or **"cfg"** field, depending on the version of the fairseq framework used to train the model. If you get an error using a "get_args_" function from the Wav2Vec2 factory class, the checkpoint is likely a **"cfg"** one, thus try using the "get_cfg_" equivalent function instead and vice versa).
   2. You must also manually edit the file `Tools/decoding_utils.py` with paths local to you in the following places:<br />
-- `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> kenlm_model` (if using a KenLM external language model)
-- `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> lexicon` (if using a KenLM external language model)
-- `TransformerDecoder -> __init__ -> transformerLM_root_folder` (if using a TransformerLM external language model)
-- `TransformerDecoder -> __init__ -> lexicon` (if using a TransformerLM external language model)
-<br /><br />
-Future ASR models to be integrated with their own factories:<br />
-- Conformer-Transducer (NeMo framework)
+  - `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> kenlm_model` (if using a KenLM external language model)
+  - `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> lexicon` (if using a KenLM external language model)
+  - `TransformerDecoder -> __init__ -> transformerLM_root_folder` (if using a TransformerLM external language model)
+  - `TransformerDecoder -> __init__ -> lexicon` (if using a TransformerLM external language model)<br /><br />
+
+  **UPDATE:** word-level time alignment output information, as well as multiple hypotheses output is now supported. Please read [Time Aligned Predictions and Forced Alignment](https://github.com/C3Imaging/speech-augmentation?tab=readme-ov-file#time-aligned-predictions-and-forced-alignment) section for more details.<br />
+- Whisper ([whisper-timestamped](https://github.com/linto-ai/whisper-timestamped) framework): You can run `whisper_time_alignment.py` to generate hypothesis text transcripts from an unlabelled audio dataset with optional word-level time alignment output information as well as multiple hypotheses output.<br />
+Run `python whisper_time_alignment.py --help` for a description of the usage.<br />
+Please read [Time Aligned Predictions and Forced Alignment](https://github.com/C3Imaging/speech-augmentation?tab=readme-ov-file#time-aligned-predictions-and-forced-alignment) section for more details.<br /><br />
+- Conformer ([NeMo](https://github.com/NVIDIA/NeMo) framework): Please see the [NeMo ASR Experiments](https://github.com/abarcovschi/nemo_asr/blob/main/README.md) project for more details.
 
 ## Time Aligned Predictions and Forced Alignment
 
@@ -117,7 +121,7 @@ hypotheses2_of_3.json -> contains the second best hypothesis per audio file in t
 hypotheses3_of_3.json -> contains the third best hypothesis per audio file in the input folder.
 ```
 files are created, with each file containing a JSON row (dict containing 'wav_path', 'id', 'pred_txt', ['timestamps_word'] fields) per audio file in the input folder.<br /><br />
-If `--num_hyps` is set to 1 when using `wav2vec2_infer_custom.py`, or if using a decoder that does not support returning multiple hypotheses; and if `--num_hyps` is set to 1 or if `--beam_size` is set to 1 when using `whisper_time_alignment.py`, then a **single** `best_hypothesis.json` file will be created, containing just the best hypothesis per audio file in the input folder.<br /><br />
+If `--num_hyps` is set to 1 when using `wav2vec2_infer_custom.py`, or if using a decoder that does not support returning multiple hypotheses; and if `--num_hyps` is set to 1 or if `--beam_size` is set to 1 when using `whisper_time_alignment.py`, then a **single** `best_hypotheses.json` file will be created, containing just the best hypothesis per audio file in the input folder.<br /><br />
 
 For the output format produced using NeMo models using the [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py) script, please see the [**NeMo ASR Experiments**](https://github.com/abarcovschi/nemo_asr/blob/main/README.md#generating-time-alignments-for-transcriptions) project (output is similar, but has character-level timestamps option also).
 
