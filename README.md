@@ -147,4 +147,9 @@ The configuration for a diarization run can be modified in the `diarization/diar
      In the main folder where the multispeaker audiofiles are located, create a `speaker-samples` subfolder. In it, create a subfolder for each audiofile with the same name as the audiofile. In each of these subfolders, have a `<SPEAKER_ID>.WAV` file for each speaker you wish to segment in the corresponding multispeaker audiofile from the main folder.<br /><br />
 **NOTE:** Resemblyzer **requires** separate audiofiles from which to create speaker embeddings, so this step is **mandatory**.
 
+## WER Calculation using Sclite
 
+The hypotheses transcripts located in the JSON files outputted by ASR inference scripts can be compared against corresponding ground truth transcripts using the sclite tool from [usnistgov/SCTK](https://github.com/usnistgov/SCTK).<br />
+Sclite compares a `hypothesis.txt` file against a `reference.txt` and calculates the WER along with other statistics detailed [here](https://github.com/usnistgov/SCTK/blob/master/doc/outputs.htm) (download the file and open in browser to view).<br />
+- To create a `hypothesis.txt` file from an ASR inference output JSON file, run `Tools/asr/wer_sclite/asr_json_output_to_hypothesis_file.py`.<br />
+- To create a `reference.txt` file by traversing the directory tree of a parallel <audio, ground truth transcript> dataset, run `Tools/asr/wer_sclite/create_reference_file.py`.
