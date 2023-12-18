@@ -83,7 +83,7 @@ def get_speech_data_lists(dirpath, filenames):
 
     Args:
       dirpath (str):
-        The path to the directory containing the audio files and transcript file.
+        The path to the directory containing the audio files and transcript files.
       filenames (list of str elements):
         the list of all files found by os.walk in this directory.
 
@@ -91,7 +91,7 @@ def get_speech_data_lists(dirpath, filenames):
       speech_files (str, list):
         A sorted list of speech file paths found in this directory.
       transcripts (str, list):
-        A list of transcript strings corresponing to each speech file.
+        A list of transcript strings corresponding to each speech file.
     """
     speech_files = []
     transcripts_files = []

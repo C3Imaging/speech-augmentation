@@ -74,7 +74,7 @@ def get_transcript_from_alignment(path):
             if "confidence_score" in line:
                 pass
             else:
-                # append the start time of each word to the start times list, with a slight time padding before the word
+                # append the word
                 transcript.append(line.split(",")[1])
     
     return " ".join(transcript)

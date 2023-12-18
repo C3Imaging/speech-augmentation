@@ -7,13 +7,23 @@ import soundfile as sf
 from cleese.cleese import cleeseProcess
 
 
-def list_spkr_dirnames(dir_of_spkrs):
+def list_in_spkr_dirnames(dir_of_spkrs):
     spkr_dir_list = []
     for spkr_id in os.listdir(dir_of_spkrs):
-        # print(spkr_id)
-        if os.path.isdir(os.path.join(dir_of_spkrs, spkr_id)):
+        spkr_path = os.path.join(dir_of_spkrs, spkr_id)
+        if os.path.isdir(spkr_path) and (spkr_path.endswith('_m') or spkr_path.endswith('_f')):
             spkr_dir_list.append(os.path.join(dir_of_spkrs, spkr_id))
-    
+    if not spkr_dir_list:
+        raise Exception(f"No speaker folders with gender tag suffixes found in {dir_of_spkrs}. Please ensure all speaker folders have a gender tag by running the 'Compute_librispeech_cmukids_similarities.py' script first.")
+    return spkr_dir_list
+
+
+def list_out_spkr_dirnames(dir_of_spkrs):
+    spkr_dir_list = []
+    for spkr_id in os.listdir(dir_of_spkrs):
+        spkr_path = os.path.join(dir_of_spkrs, spkr_id)
+        if os.path.isdir(spkr_path):
+            spkr_dir_list.append(os.path.join(dir_of_spkrs, spkr_id))
     return spkr_dir_list
         
 

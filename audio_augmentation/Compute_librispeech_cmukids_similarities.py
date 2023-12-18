@@ -11,13 +11,17 @@ similarity, and those from distinct speakers to have a lower one.
 
 import os
 import sys
-import time
 import logging
 import argparse
 import warnings
 import operator
 import numpy as np
 from tqdm import tqdm
+
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
 from Utils import utils
 from pathlib import Path
 from itertools import groupby
@@ -47,11 +51,21 @@ def get_kids_wavpaths(path):
 
 
 def get_genders_dict(path):
-    #open text file containing Librispeech Speaker IDs and genders
-    try:
-        speakers_info = open(os.path.join(Path(args.adults_dir).parent, "SPEAKERS.TXT"), 'r')
-    except FileNotFoundError:
-        speakers_info = open(os.path.join(Path(args.adults_dir).parent, "SPEAKERS.txt"), 'r')
+    #open text file containing Librispeech/LibriTTS speaker IDs and genders, it is always either called SPEAKERS.txt of SPEAKERS.TXT
+    files = ' '.join(os.listdir(path))
+    if "SPEAKERS." in files:
+        try:
+            speakers_info = open(os.path.join(path, "SPEAKERS.TXT"), 'r')
+        except FileNotFoundError:
+            speakers_info = open(os.path.join(path, "SPEAKERS.txt"), 'r')
+    else:
+        parent_path = Path(path).parent
+        parent_files = os.listdir(parent_path)
+        if "SPEAKERS." in parent_files:
+            try:
+                speakers_info = open(os.path.join(parent_path, "SPEAKERS.TXT"), 'r')
+            except FileNotFoundError:
+                speakers_info = open(os.path.join(parent_path, "SPEAKERS.txt"), 'r')
     # read info about all speakers from the entire Librispeech collection
     ids = []
     genders = []
@@ -105,10 +119,8 @@ def get_embeds(adults_speaker_wavs, kids_speaker_wavs):
     # applies L2 norm to averages after.
     # each embeddings matrix is of shape (num_speakers, embed_size).
     # one matrix for the kids speakers and one for the adults.
-    embeds_adults = np.array([encoder.embed_speaker(wavs[:len(wavs)]) \
-                            for wavs in adults_speaker_wavs.values()])
-    embeds_kids = np.array([encoder.embed_speaker(wavs[:len(wavs)]) \
-                            for wavs in kids_speaker_wavs.values()])
+    embeds_adults = np.array([encoder.embed_speaker(wavs[:len(wavs)]) for wavs in tqdm(adults_speaker_wavs.values(), total=len(adults_speaker_wavs.values()), unit=" adult speaker", desc=f"Calculating speaker embeddings for adult speakers")])
+    embeds_kids = np.array([encoder.embed_speaker(wavs[:len(wavs)]) for wavs in tqdm(kids_speaker_wavs.values(), total=len(kids_speaker_wavs.values()), unit=" child speaker", desc=f"Calculating speaker embeddings for child speakers")])
 
     return embeds_adults, embeds_kids
 
@@ -187,7 +199,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run speaker encoder on a Librispeech/LibriTTS-formatted dataset and create new folder with speakers that have highest cosine similarity in embeddings space compared to CMU kids speakers.")
+        description="Run speaker encoder on a Librispeech/LibriTTS-formatted dataset and create new folder with speakers that have highest cosine similarity in embeddings space compared to average CMU kids speaker.")
     parser.add_argument("--adults_dir", type=str, required=True,
                         help="Path to an existing folder (has Librispeech/LibriTTS folder structure) containing adult speakers folders. Example: /path/to/LibriSpeech-train-clean-100/LibriSpeech/train-clean-100")
     parser.add_argument("--kids_dir", type=str, required=True,
@@ -200,25 +212,12 @@ if __name__ == "__main__":
     # parse command line arguments
     args = parser.parse_args()
 
-    # set the cosine similarity threshold for adult speakers
-    # similarity_threshold = 0.65
-
-    # define the root output folder that will contain subfolders of adult speakers in Librispeech format
-    # the adult speakers selected will be the ones with the highest similarity to child speakers.
-    # we will build this folder using this script.
-    # OUTPUTDIR = f"/workspace/projects/Alignment/wav2vec2_alignment/speaker_encoder_outputs/Librispeech-train-clean-100-similarity-above-{similarity_threshold}"
-    # ADULTS_CORPUS = "/workspace/datasets/LibriSpeech-train-clean-100/LibriSpeech/train-clean-100" # Librispeech path
-    # KIDS_CORPUS = "/workspace/datasets/cmu_kids_test"
-
-    # setup logging to both console and logfile
+    # setup logging to both console and logfile.
     utils.setup_logging(args.out_dir, 'adult_speakers_filtering.log', console=True, filemode='a')
 
-    # start timing how long it takes to run script
-    tic = time.perf_counter()
-    # log the command that started the script
-    logging.info(f"Started script via: python {' '.join(sys.argv)}")
+    p = utils.Profiler()
+    p.start()
 
     main(args)
 
-    toc = time.perf_counter()
-    logging.info(f"Finished processing in {time.strftime('%H:%M:%Ss', time.gmtime(toc - tic))}")
+    p.stop()

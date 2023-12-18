@@ -80,7 +80,7 @@ def get_speech_data_lists(dirpath, filenames):
       speech_files (str, list):
         A sorted list of speech file paths found in this directory.
       transcripts (str, list):
-        A list of transcript strings corresponing to each speech file.
+        A list of transcript strings corresponding to each speech file.
     """ 
     speech_files = []
     transcript, transcripts = None, None

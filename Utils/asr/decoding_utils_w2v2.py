@@ -24,7 +24,6 @@ else:
     from . import decoding_utils_torch
 
 from fairseq.models.wav2vec.wav2vec2_asr import Wav2VecCtc, Wav2Vec2CtcConfig
-from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder, W2lKenLMDecoder, W2lFairseqLMDecoder
 
 
 def convert_to_upper(filepath):
@@ -673,6 +672,7 @@ class ViterbiDecoder(BaseDecoder):
     """
     def __init__(self, vocab_path_or_bundle: str, num_hyps: bool = 1, time_aligns: bool = False) -> None:
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to ViterbiDecoder, must use a txt file as vocab path."
+        from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder
 
         self.num_hyps = num_hyps
         self.time_aligns = time_aligns
@@ -718,6 +718,7 @@ class BeamSearchDecoder_Fairseq(BaseDecoder):
     """
     def __init__(self, vocab_path_or_bundle: str, num_hyps: int = 1, time_aligns: bool = False) -> None:
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to BeamSearchDecoder_Fairseq, must use a txt file as vocab path."
+        from examples.speech_recognition.w2l_decoder import W2lKenLMDecoder
 
         self.num_hyps = num_hyps
         self.time_aligns = time_aligns
@@ -840,6 +841,8 @@ class TransformerDecoder(BaseDecoder):
     """
     def __init__(self, vocab_path_or_bundle: str, num_hyps: int = 1, time_aligns: bool = False) -> None:
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to TransformerDecoder, must use a txt file as vocab path."
+        from examples.speech_recognition.w2l_decoder import W2lFairseqLMDecoder
+
 
         self.num_hyps = num_hyps
         self.time_aligns = time_aligns
@@ -1043,7 +1046,6 @@ class Wav2Vec2_Decoder_Factory():
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 BeamSearchDecoder_Torch(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # 
     def get_args_beamsearchkenlm_torch(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
         """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a beam search decoder from torchaudio with a KenLM external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

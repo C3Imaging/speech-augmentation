@@ -62,13 +62,18 @@ def run_inference(args, model, labels, dictionary, sr, speech_files, transcripts
                 emissions = model.forward([speech_filename], device)
             else:
                 # using torchaudio w2v2 model.
-                # generate the label class probability of each audio frame using wav2vec2 for each label (outputs are actually in logits, not probabilities)
+                # generate the label class probability of each audio frame using wav2vec2 for each label (outputs are actually in logits, not probabilities).
                 waveform, _ = torchaudio.load(speech_filename)
                 emissions, _ = model(waveform.to(device))
-                emissions = torch.log_softmax(emissions, dim=-1) # probability in log domain to avoid numerical instability
+                emissions = torch.log_softmax(emissions, dim=-1) # probability in log domain to avoid numerical instability.
             # probability of each vocabulary label at each time step
-            # for silences, wav2vec2 predicts the '|' label with very high probability, which is the word boundary label
-            emission = emissions[0].cpu().detach()[0] # model returns a batch dimension as [0], even if using batch size of 1.
+            # for silences, wav2vec2 predicts the '|' label with very high probability, which is the word boundary label.
+            if emissions[0].size(0) == 1:
+                # custom fairseq checkpoint returns a list of 2 elements, where [0] is the batched emission matrix.
+                emission = emissions[0].cpu().detach()[0]
+            else:
+                # torchaudio returns just the batched emission matrix.
+                emission = emissions[0].cpu().detach()
             # print(labels)
             # plt.imshow(emission.T)
             # plt.colorbar()
@@ -105,8 +110,8 @@ def run_inference(args, model, labels, dictionary, sr, speech_files, transcripts
 
             # create unique id of this audio by including leaf folder of the audio filepath in the id.
             # this will be used as the subfolder in args.out_dir into which to save the figures for this audio file.
-            temp = speech_filename.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
-            temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
+            temp = speech_filename.split('/')[-2:] # [0] = subfolder, [1] = ____.wav/____.flac
+            temp[-1] = temp[-1].split('.wav')[0] if '.wav' in temp else temp[-1].split('.flac')[0] # remove '.wav' or '.flac'
             id = '/'.join(temp)
 
             with open(os.path.join(args.out_dir, 'forced_alignments.json'), 'a') as f:
@@ -226,17 +231,17 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Perform forced alignment between ground-truth transcripts and the ASR acuostic model output using the CTC segmentation algorithm. <audio, ground truth transcript> data is read either from folder(s) structured in Librispeech or LibriTTS format or using <audio, transcript> data from a previously created hypotheses.json file after running an ASR inference script. NOTE1: Script is updated with LibriTTS format support, but must provide a '--libritts' flag. NOTE2: Script is updated to use both wav2vec2 ASR models from torchaudio library and custom fairseq/flashlight models.")
+        description="Perform forced alignment between ground-truth transcripts and the ASR acoustic model output using the CTC segmentation algorithm. <audio, ground truth transcript> data is read either from folder(s) structured in Librispeech or LibriTTS format or using <audio, transcript> data from a previously created hypotheses.json file after running an ASR inference script. NOTE1: Script is updated with LibriTTS format support, but must provide a '--libritts' flag. NOTE2: Script is updated to use both wav2vec2 ASR models from torchaudio library and custom fairseq/flashlight models.")
     parser.add_argument("folder", type=str, nargs='?', default=os.getcwd(),
-                        help="From where <audio, ground truth transcripts> data is taken: path to a folder structured in Librispeech or LibriTTS format. Can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders (use --mode='root' in this case), or a leaf folder containing audio and transcript file(s) (use --mode='leaf' in this case). Defaults to CWD if not provided.")
+                        help="From where <audio, ground truth transcripts> data is taken: path to a folder structured in Librispeech (only one transcripts.txt file in each audio subfolder) or LibriTTS (an individual transcript.txt file for each audio file) format. Can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders (use --mode='root' in this case), or a leaf folder containing audio and transcript file(s) (use --mode='leaf' in this case). Defaults to CWD if not provided.")
     parser.add_argument("--input_from_json", type=str, default='',
-                        help="From where <audio, ground truth transcripts> data is taken: input data is now taken from the full path to a hypotheses.json file, which was the result of running inference using 'wav2vec2_infer_custom.py', 'whisper_time_alignment.py' or 'https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py', i.e. script treats output hypotheses in the json file as the ground truth transcripts. If used, the 'folder' path, '--mode' and '--libritts' flags are all ignored. Defaults to '' (i.e. 'folder' is used as the input data source).")
+                        help="From where <audio, ground truth transcripts> data is taken: input data is now taken from the full path to a hypotheses.json file, which was the result of running inference using 'wav2vec2_infer_custom.py', 'whisper_time_alignment.py' or 'https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py', i.e. script treats output hypotheses in the JSON file as the ground truth transcripts. If used, the 'folder' path, '--mode' and '--libritts' flags are all ignored. Defaults to '' (i.e. 'folder' is used as the input data source).")
     parser.add_argument("--out_dir", type=str, required=True,
                     help="Path to a new output folder to create, where results will be saved.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
-                        help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified. Flag is ignored if using '--w2v2_infer_custom'")
+                        help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified. Flag is ignored if using '--input_from_json'")
     parser.add_argument("--libritts", default=False, action='store_true',
-                        help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided. Flag is ignored if using '--w2v2_infer_custom'.")
+                        help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided. Flag is ignored if using '--input_from_json'.")
     parser.add_argument("--model_path", type=str, default='',
                         help="Path of a finetuned wav2vec2 model's .pt file. If unspecified, by default the script will use WAV2VEC2_ASR_LARGE_LV60K_960H torchaudio w2v2 model.")
     parser.add_argument("--vocab_path", type=str, default='',
