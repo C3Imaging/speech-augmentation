@@ -9,7 +9,7 @@ from fairseq.data import Dictionary
 from fairseq.data.data_utils import post_process
 from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder
 from fairseq.models.wav2vec.wav2vec2_asr import Wav2VecCtc, Wav2Vec2CtcConfig
-from Tools.asr.decoding_utils_chkpt import get_features_list, get_padded_batch_mxs, get_config_dict
+from Utils.asr.decoding_utils_chkpt import get_features_list, get_padded_batch_mxs, get_config_dict
 
 
 if __name__ == "__main__":

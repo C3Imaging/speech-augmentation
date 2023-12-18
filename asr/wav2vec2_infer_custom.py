@@ -1,11 +1,17 @@
 import os
+import sys
 import json
 import argparse
-from Tools import utils
+
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+from Utils import utils
 from pathlib import Path
 from typing import List, Any, Union, Optional, Tuple, Dict
-from Tools.asr.decoding_utils_w2v2 import Wav2Vec2_Decoder_Factory, ViterbiDecoder, GreedyDecoder, BaseDecoder
-from Tools.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_all_wavs
+from Utils.asr.decoding_utils_w2v2 import Wav2Vec2_Decoder_Factory, ViterbiDecoder, GreedyDecoder, BaseDecoder
+from Utils.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_all_wavs
 
 
 def format_w2v2_output(w2v2_output: Union[List[List[Dict]], List[Dict]], time_aligns: bool, num_hyps: int, decoder: BaseDecoder) -> List[Hypotheses]:
@@ -58,9 +64,9 @@ def format_w2v2_output(w2v2_output: Union[List[List[Dict]], List[Dict]], time_al
 def main(args):
     # create model + decoder pair (change manually).
     if args.model_path:
-        # asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearch_fairseq(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
+        asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearch_fairseq(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
         # asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
-        asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_fairseq(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
+        # asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchkenlm_fairseq(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
         # asr = Wav2Vec2_Decoder_Factory.get_cfg_viterbi(model_filepath=args.model_path, vocab_path=args.vocab_path, num_hyps=args.num_hyps, time_aligns=args.time_aligns)
     else:
         # default to a torchaudio wav2vec2 model if not using a custom .pt checkpoint.

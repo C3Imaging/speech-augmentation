@@ -5,8 +5,8 @@ import logging
 import argparse
 import torchaudio
 from tqdm import tqdm
-from Tools import utils
-from Tools.asr import decoding_utils_torch
+from Utils import utils
+from Utils.asr import decoding_utils_torch
 
 
 # running average WER for a decoder

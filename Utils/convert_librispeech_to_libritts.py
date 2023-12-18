@@ -2,7 +2,7 @@ import os
 import sys
 import argparse
 from pydub import AudioSegment
-from Tools import librispeech_utils
+from Utils.asr import librispeech_utils
 
 sys.path.append("/usr/bin/ffmpeg")
 

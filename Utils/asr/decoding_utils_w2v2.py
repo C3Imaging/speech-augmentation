@@ -19,7 +19,7 @@ from fairseq.data import Dictionary
 from typing import List, Any, Union, Optional, Tuple, Dict
 
 if __name__ == "__main__":
-    import Tools.asr.decoding_utils_chkpt as decoding_utils_chkpt, Tools.asr.decoding_utils_torch as decoding_utils_torch
+    import Utils.asr.decoding_utils_chkpt as decoding_utils_chkpt, Utils.asr.decoding_utils_torch as decoding_utils_torch
 else:
     from . import decoding_utils_torch
 

@@ -5,15 +5,22 @@ Based on this project: https://github.com/linto-ai/whisper-timestamped
 This is not forced-alignment, but just timestamping the output of the Whisper acoustic model using Dynamic Time Warping.
 """
 
+
+import os
 import sys
 import torch
 import logging
 import argparse
 from tqdm import tqdm
-from Tools import utils
+
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+from Utils import utils
 from typing import List, Union, Dict
 import whisper_timestamped as whisper
-from Tools.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_all_wavs
+from Utils.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_all_wavs
 
 
 def format_whisper_output(whisper_output: Union[List[List[Dict]], List[Dict]], time_aligns: bool, num_hyps: int) -> List[Hypotheses]:
@@ -42,7 +49,7 @@ def format_whisper_output(whisper_output: Union[List[List[Dict]], List[Dict]], t
                 for segment in audio_result['segments']:
                     for word in segment['words']:
                         word_aligns.append(WordAlign(word['text'], word['start'], word['end']))
-            hypotheses.append(Hypothesis(audio_result['text'], word_aligns))
+            hypotheses.append(Hypothesis(audio_result['text'].strip(), word_aligns))
         else:
             # beam_size > 1
             try:
@@ -54,7 +61,7 @@ def format_whisper_output(whisper_output: Union[List[List[Dict]], List[Dict]], t
                         for segment in hypo['segments']:
                             for word in segment['words']:
                                 word_aligns.append(WordAlign(word['text'], word['start'], word['end']))
-                    hypotheses.append(Hypothesis(hypo['text'], word_aligns))
+                    hypotheses.append(Hypothesis(hypo['text'].strip(), word_aligns))
             except KeyError:
                 logging.error("Cannot return multiple hypotheses because the original 'whisper' and 'whisper-timestamped' libraries do not provide this functionality. Need to manually edit libraries' implementations -> Please use forked code from https://github.com/abarcovschi/whisper-fork and https://github.com/abarcovschi/whisper-timestamped-fork to make this script work with '--num_hyps' > 1.")
                 sys.exit(1)

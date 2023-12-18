@@ -5,7 +5,7 @@ current = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, current + '/..')
 import logging
 import argparse
-from Tools import utils
+from Utils import utils
 from config import Config
 import diarization_utils
 

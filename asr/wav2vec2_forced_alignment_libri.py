@@ -6,6 +6,7 @@ For a more detailed explanation on how forced-alignment works see: https://nvidi
 """
 
 import os
+import sys
 import json
 import torch
 import logging
@@ -14,9 +15,14 @@ import torchaudio
 import matplotlib
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from Tools.asr.decoding_utils_w2v2 import Wav2Vec2_Decoder_Factory
-from Tools import utils, librispeech_utils, libritts_utils
-from Tools.asr import forced_alignment_utils
+
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+from Utils import utils
+from Utils.asr.decoding_utils_w2v2 import Wav2Vec2_Decoder_Factory
+from Utils.asr import forced_alignment_utils, librispeech_utils, libritts_utils
 
 
 def run_inference(args, model, labels, dictionary, sr, speech_files, transcripts):
@@ -33,8 +39,8 @@ def run_inference(args, model, labels, dictionary, sr, speech_files, transcripts
      Then repeating labels for the same character are first merged into one ground truth transcript character and then those are merged into words and the start and stop times of each word can then be saved.
 
      NOTE: We force the alignment between the ground truth transcript and timesteps because we only concentrate on using the probabilities of the ground truth transcript characters at each timestep, disregarding
-     all other possible alignments which may have tokens with higher probabilities in the emission matrix at a particular timestep, thus this is called wav2vec2 forced alignment.
-           The model's output is not processed by any decoding algorithms to find a transcript (e.g. beam search, greedy search) because we have a ground truth transcript.
+     all other possible alignments which may have tokens with higher probabilities in the emission matrix at a particular timestep, thus this is called forced alignment.
+        The model's emission output is not processed by any decoding algorithms to find a transcript (e.g. beam search, greedy search) because we have a ground truth transcript.
     
     The alignments of each word in each speech file is saved into the output directory. Optionally, plots of the alignment between words predicted by wav2vec2 and the audio file
      can be saved as images into the output directory if the --save_figs flag is set and each word segment extracted from the audio file can be saved as a separate audio file snippet
@@ -62,7 +68,7 @@ def run_inference(args, model, labels, dictionary, sr, speech_files, transcripts
                 emissions = torch.log_softmax(emissions, dim=-1) # probability in log domain to avoid numerical instability
             # probability of each vocabulary label at each time step
             # for silences, wav2vec2 predicts the '|' label with very high probability, which is the word boundary label
-            emission = emissions[0].cpu().detach()
+            emission = emissions[0].cpu().detach()[0] # model returns a batch dimension as [0], even if using batch size of 1.
             # print(labels)
             # plt.imshow(emission.T)
             # plt.colorbar()
@@ -225,16 +231,16 @@ if __name__ == "__main__":
                         help="From where <audio, ground truth transcripts> data is taken: path to a folder structured in Librispeech or LibriTTS format. Can be a root folder containing other subfolders, such as speaker subfolders or recording session subfolders (use --mode='root' in this case), or a leaf folder containing audio and transcript file(s) (use --mode='leaf' in this case). Defaults to CWD if not provided.")
     parser.add_argument("--input_from_json", type=str, default='',
                         help="From where <audio, ground truth transcripts> data is taken: input data is now taken from the full path to a hypotheses.json file, which was the result of running inference using 'wav2vec2_infer_custom.py', 'whisper_time_alignment.py' or 'https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py', i.e. script treats output hypotheses in the json file as the ground truth transcripts. If used, the 'folder' path, '--mode' and '--libritts' flags are all ignored. Defaults to '' (i.e. 'folder' is used as the input data source).")
-    parser.add_argument("--model_path", type=str, default='',
-                        help="Path of a finetuned wav2vec2 model's .pt file. If unspecified, by default the script will use WAV2VEC2_ASR_LARGE_LV60K_960H torchaudio w2v2 model.")
-    parser.add_argument("--vocab_path", type=str, default='',
-                        help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning. Must be provided if '--model_path' arg is used.")
     parser.add_argument("--out_dir", type=str, required=True,
-                        help="Path to a new output folder to create, where results will be saved.")
+                    help="Path to a new output folder to create, where results will be saved.")
     parser.add_argument("--mode", type=str, choices={'leaf', 'root'}, default="root",
                         help="Specifies how the folder will be processed.\nIf 'leaf': only the folder will be searched for audio files (single folder inference),\nIf 'root': subdirs are searched (full dataset inference).\nDefaults to 'root' if unspecified. Flag is ignored if using '--w2v2_infer_custom'")
     parser.add_argument("--libritts", default=False, action='store_true',
                         help="Flag used to specify whether the dataset is in LibriTTS format. Defaults to False (i.e. Librispeech) if flag is not provided. Flag is ignored if using '--w2v2_infer_custom'.")
+    parser.add_argument("--model_path", type=str, default='',
+                        help="Path of a finetuned wav2vec2 model's .pt file. If unspecified, by default the script will use WAV2VEC2_ASR_LARGE_LV60K_960H torchaudio w2v2 model.")
+    parser.add_argument("--vocab_path", type=str, default='',
+                        help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning. Must be provided if '--model_path' arg is used.")
     parser.add_argument("--save_figs", default=False, action='store_true',
                         help="Flag used to specify whether graphs of alignments are saved for each audio file. Defaults to False if flag is not provided.")
 

@@ -5,7 +5,7 @@ import os
 import torch
 import torchaudio
 import torchaudio.models.decoder
-from Tools.asr import decoding_utils_torch
+from Utils.asr import decoding_utils_torch
 
 if __name__ == "__main__":
     # folder for saving output wavefiles (and manually plots if needed)
