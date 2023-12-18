@@ -5,42 +5,62 @@ Based on this project: https://github.com/linto-ai/whisper-timestamped
 This is not forced-alignment, but just timestamping the output of the Whisper acoustic model using Dynamic Time Warping.
 """
 
-import os
 import sys
-import time
-import json
 import torch
 import logging
 import argparse
 from tqdm import tqdm
 from Tools import utils
-from pathlib import Path
+from typing import List, Union, Dict
 import whisper_timestamped as whisper
+from Tools.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_all_wavs
 
 
-def normalize_timestamp_output(segments):
+def format_whisper_output(whisper_output: Union[List[List[Dict]], List[Dict]], time_aligns: bool, num_hyps: int) -> List[Hypotheses]:
     """
+    Convert the output of a Whisper decoder to a common format using dataclasses from 'Tools/asr/common_utils.py'.
+
     Args:
-        segments (List[Dict]):
-            List of segments in the transcript, where each segment is a Dict that encompasses a few words in the transcript, or the entire transcript if there is only 1 segment.
-
+        whisper_output (Union[List[List[Dict]], List[Dict]]):
+            The output returned by Whisper inference on a batch of audio files from 'whisper_time_alignment.py', with word-level timestamps support.
+        time_aligns (bool):
+            Whether to include word-level time alignments in the results.
+        num_hyps (int):
+            The number of top hypotheses to keep in the results.
     Returns:
-        values (List[Dict]):
-            List of dict objects where each dict has the following fields:
-                'word': [str] the word itself.
-                'start_time': [float] the start time in seconds of the word in the corresponding audio file.
-                'end_time': [float] the end time in seconds of the word in the corresponding audio file.
+        results (List[Hypotheses]):
+            The common format for results for any ASR inference output.
     """
-    values = []
-    for segment in segments:
-        for word in segment['words']:
-            word_dict = dict()
-            word_dict['word'] = word['text']
-            word_dict['start_time'] = word['start']
-            word_dict['end_time'] = word['end']
-            values.append(word_dict)
-    
-    return values
+    # loop through the result for each audio file.
+    results = list()
+    for audio_result in whisper_output:
+        hypotheses = list()
+        if isinstance(audio_result, dict):
+            # beam_size = 1 or using unmodified whisper-timestamped library
+            word_aligns = list()
+            if time_aligns:
+                for segment in audio_result['segments']:
+                    for word in segment['words']:
+                        word_aligns.append(WordAlign(word['text'], word['start'], word['end']))
+            hypotheses.append(Hypothesis(audio_result['text'], word_aligns))
+        else:
+            # beam_size > 1
+            try:
+                for i in range(num_hyps):
+                    # create only as many Hypothesis objects as num_hyps.
+                    hypo = audio_result[i]
+                    word_aligns = list()
+                    if time_aligns:
+                        for segment in hypo['segments']:
+                            for word in segment['words']:
+                                word_aligns.append(WordAlign(word['text'], word['start'], word['end']))
+                    hypotheses.append(Hypothesis(hypo['text'], word_aligns))
+            except KeyError:
+                logging.error("Cannot return multiple hypotheses because the original 'whisper' and 'whisper-timestamped' libraries do not provide this functionality. Need to manually edit libraries' implementations -> Please use forked code from https://github.com/abarcovschi/whisper-fork and https://github.com/abarcovschi/whisper-timestamped-fork to make this script work with '--num_hyps' > 1.")
+                sys.exit(1)
+        results.append(Hypotheses(hypotheses))
+        
+    return results
 
 
 def run_inference(model, beam_size, speech_files):
@@ -84,59 +104,21 @@ def run_inference(model, beam_size, speech_files):
 def main(args):
     "Setup and use whisper model for time alignment between predicted transcript and audio file."
 
+    # model setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = whisper.load_model(args.model_path, device=device)
 
     # get all wav files as strings.
-    wav_paths = list(map(lambda x: str(x), list(Path(args.in_dir).glob("**/*.wav"))))
-    # filter out any undesired wav files.
-    if args.path_filters:
-        for fil in args.path_filters:
-            wav_paths = [w for w in wav_paths if fil not in w]
-    
-    wav_paths.sort()
+    wav_paths = get_all_wavs(args.in_dir, args.path_filters)
 
     # run ASR inference and decode into predicted hypothesis transcripts.
-    hypos = run_inference(model, args.beam_size, wav_paths)
+    results = run_inference(model, args.beam_size, wav_paths)
 
-    # populate best_hypotheses.json file (if num_hyps=1) or hypothesesX_of_N.json files (if num_hyps > 1).
-    if args.num_hyps > 1:
-        # save all hypotheses to files.
-        try:
-            for all_hyps, wav_path in zip(hypos, wav_paths):
-                for i in range(args.num_hyps):
-                    with open(os.path.join(args.out_dir, f"hypotheses{i+1}_of_{len(all_hyps)}.json"), 'a') as hyp_file:
-                        # create unique id of audio sample by including leaf folder in the id.
-                        temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
-                        temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
-                        id = '/'.join(temp)
-                        item = dict()
-                        item['wav_path'] = wav_path
-                        item['id'] = id
-                        item['pred_txt'] = all_hyps[i]['text']
-                        if args.time_aligns:
-                            values = normalize_timestamp_output(all_hyps[i]['segments'])
-                            item['timestamps_word'] =  values
-                        hyp_file.write(json.dumps(item) + "\n")
-        except KeyError:
-            logging.error("Cannot return multiple hypotheses because the original 'whisper' and 'whisper-timestamped' libraries do not provide this functionality. Need to manually edit libraries' implementations -> Please use forked code from https://github.com/abarcovschi/whisper-fork and https://github.com/abarcovschi/whisper-timestamped-fork to make this script work with '--num_hyps' > 1.")
-            sys.exit(1)
-    else:
-        with open(os.path.join(args.out_dir, "best_hypotheses.json"), 'w') as hyp_file:
-            for all_hyps, wav_path in zip(hypos, wav_paths):
-                # create unique id of audio sample by including leaf folder in the id.
-                temp = wav_path.split('/')[-2:] # [0] = subfolder, [1] = ____.wav
-                temp[-1] = temp[-1].split('.wav')[0] # remove '.wav'
-                id = '/'.join(temp)
-                item = dict()
-                item['wav_path'] = wav_path
-                item['id'] = id
-                # use just the best hypothesis.
-                item['pred_txt'] = all_hyps[0]['text']
-                if args.time_aligns:
-                    values = normalize_timestamp_output(all_hyps[i]['segments'])
-                    item['timestamps_word'] =  values
-                hyp_file.write(json.dumps(item) + "\n")
+    # format decoded ASR inference results to a common interface.
+    results = format_whisper_output(results, args.time_aligns, args.num_hyps)
+
+    # write results hypotheses to output json files.
+    write_results(results, wav_paths, args.out_dir)
 
 
 if __name__ == "__main__":

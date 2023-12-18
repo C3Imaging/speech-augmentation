@@ -11,4 +11,7 @@ temp*.py
 .hypothesis/
 diarization/nemo_config/
 diarization/nemo_outputs/
+/workspace/speech-augmentation/Tools/__pycache__/
+/workspace/speech-augmentation/Tools/asr/__pycache__/
+/workspace/speech-augmentation/Tools/asr/wer_sclite/__pycache__/
 

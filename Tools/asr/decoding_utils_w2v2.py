@@ -1,4 +1,7 @@
-# using principles of dependency injection and dependency inversion and creating factories to simplify API of using wav2vec2 models loaded in different ways + various decoders for ASR inference
+"""
+Uses principles of dependency injection and dependency inversion and creating factories to simplify API of using wav2vec2 models loaded in different ways + various decoders for ASR inference.
+"""
+
 
 import re
 import os
@@ -10,13 +13,16 @@ import torchaudio
 from tqdm import tqdm
 from argparse import Namespace
 from omegaconf import OmegaConf
-from typing import List, Any, Union, Optional, Tuple, Dict
 from abc import ABC, abstractmethod
+from . import decoding_utils_chkpt
 from fairseq.data import Dictionary
+from typing import List, Any, Union, Optional, Tuple, Dict
+
 if __name__ == "__main__":
-    import decoding_utils_chkpt, decoding_utils_torch
+    import Tools.asr.decoding_utils_chkpt as decoding_utils_chkpt, Tools.asr.decoding_utils_torch as decoding_utils_torch
 else:
-    from . import decoding_utils_chkpt, decoding_utils_torch
+    from . import decoding_utils_torch
+
 from fairseq.models.wav2vec.wav2vec2_asr import Wav2VecCtc, Wav2Vec2CtcConfig
 from examples.speech_recognition.w2l_decoder import W2lViterbiDecoder, W2lKenLMDecoder, W2lFairseqLMDecoder
 
@@ -88,7 +94,7 @@ def get_word_time_alignments_torch(audio_len, num_frames, sample_rate, tokens, t
 
 
 def get_word_time_alignments_fairseq(audio_len, num_frames, sample_rate, symbols, timesteps):
-    """
+    """Get word time alignments information for a hypothesis transcript input by converting from timesteps to seconds.
     Args:
         audio_len (int):
             The length of audio file in number of samples.
@@ -112,7 +118,7 @@ def get_word_time_alignments_fairseq(audio_len, num_frames, sample_rate, symbols
         timestamp = frame_num * (audio_len / (num_frames * sample_rate))
         timestamps.append(timestamp)
 
-    # NOTE: algorithm only works in the first and last symbols are '|', so add them in if that's not the case.
+    # NOTE: algorithm only works if the first and last symbols are '|', so add them in if that's not the case.
     frame_offset = 0
     if symbols[0] != '|':
         symbols.insert(0, '|')
@@ -153,10 +159,11 @@ def get_word_time_alignments_fairseq(audio_len, num_frames, sample_rate, symbols
     word_times = [(timestamps[start_idx + frame_offset], timestamps[end_idx + frame_offset]) for start_idx, end_idx in word_boundary_idxs]
 
     return word_times
-    
 
-def normalize_timestamp_output(words, word_time_tuples):
-    """
+
+def normalize_timestamp_output_w2v2(words, word_time_tuples):
+    """Get word Dict objects with time information for each word in the hypothesis transcript.
+
     Args:
         words (List[str]):
             List of words in the transcript.
@@ -166,9 +173,9 @@ def normalize_timestamp_output(words, word_time_tuples):
     Returns:
         values (List[Dict]):
             List of dict objects where each dict has the following fields:
-                'word': [str] the word itself.
-                'start_time': [float] the start time in seconds of the word in the corresponding audio file.
-                'end_time': [float] the end time in seconds of the word in the corresponding audio file.
+                'word': (str) the word itself.
+                'start_time': (float) the start time in seconds of the word in the corresponding audio file.
+                'end_time': (float) the end time in seconds of the word in the corresponding audio file.
     """
     values = []
     for word, (word_start, word_end) in zip(words, word_time_tuples):
@@ -179,6 +186,132 @@ def normalize_timestamp_output(words, word_time_tuples):
         values.append(vals_dict)
     
     return values
+
+
+def beam_search_decode_torch(decoder, hypos, emission_mx, audio_lens, num_hyps, time_aligns):
+    transcripts = []
+
+    for i in range(emission_mx.size(dim=0)):
+        # if the batch_size is > 1, use the maximum original audio length in the batch, as all other audio files are padded to the max length during preprocessing.
+        audio_len = audio_lens[i] if emission_mx.size(dim=0) == 1 else max(audio_lens)
+        # append a list of all hypotheses for this element of the batch.
+        if num_hyps > 1:
+            all_results = []
+            for hyp in hypos[i]:
+                hyp_dict = dict()
+                if hyp.words:
+                    # 'words' instance variable is not empty if using a lexicon.
+                    transcript = ' '.join(hyp.words).lower()
+                else:
+                    # 'words' instance variable is [] if lexicon-free decoding, convert from non-blank tokens to words instead.
+                    tokens = hyp.tokens
+                    tokens_str = ''.join(decoder.idxs_to_tokens(tokens))
+                    transcript = ' '.join(tokens_str.split('|')).strip().lower()
+                hyp_dict['pred_txt'] = transcript
+                if time_aligns:
+                    word_times = get_word_time_alignments_torch(audio_len, emission_mx.size(dim=1), 16000, decoder.idxs_to_tokens(hyp.tokens), hyp.timesteps)
+                    timestamps_word = normalize_timestamp_output_w2v2(transcript.split(' '), word_times)
+                    hyp_dict['timestamps_word'] = timestamps_word
+                    
+                # add a hypothesis dict
+                all_results.append(hyp_dict)
+
+            transcripts.append(all_results)
+        else:
+            hyp_dict = dict()
+            hyp = hypos[i][0]
+            # append the decoded phrase (as a list of words) from the prediction of the first beam [0] (most likely transcript).
+            if hyp.words:
+                # 'words' instance variable is not empty if using a lexicon.
+                transcript = ' '.join(hyp.words).lower()
+            else:
+                # 'words' instance variable is [] if lexicon-free decoding, convert from non-blank tokens to words instead.
+                tokens = hyp.tokens
+                tokens_str = ''.join(decoder.idxs_to_tokens(tokens))
+                transcript = ' '.join(tokens_str.split('|')).strip().lower()
+            hyp_dict['pred_txt'] = transcript
+            if time_aligns:
+                word_times = get_word_time_alignments_torch(audio_len, emission_mx.size(dim=1), 16000, decoder.idxs_to_tokens(hyp.tokens), hyp.timesteps)
+                timestamps_word = normalize_timestamp_output_w2v2(transcript.split(' '), word_times)
+                hyp_dict['timestamps_word'] = timestamps_word
+
+            # add a hypothesis dict
+            transcripts.append(hyp_dict)
+
+    return transcripts
+
+
+def beam_search_decode_fairseq(hypos, emission_mx, audio_lens, num_hyps, time_aligns):
+    """Process the results of a W2lDecoder object from fairseq.
+
+    Args:
+        hypos (Union[List[Dict], List[List[Dict]]]):
+            List of results for each audio file returned by a W2lDecoder object. If the number of hypotheses to return (W2lDecoder.nbest) is 1, hypos will be a list of just the best hypotheses dicts.
+             If W2lDecoder.nbest > 1, hypos will be a list of lists, where for each audio file there will be N best hypotheses dicts.
+        emission_mx (torch.tensor(B,T,N)):
+            The batched emission matrix outputted by the w2v2 acoustic model trained in fairseq.
+        audio_lens (List[int]):
+            The lengths of the original audio files in the batch, measured in number of samples.
+        num_hyps (int):
+            The number of best hypotheses to return per audio file.
+        time_aligns (bool):
+            Flag used to specify whether to calculate word-level time alignment in seconds for each hypothesis.
+
+    Returns:
+        transcripts (Union[List[Dict], List[List[Dict]]]):
+            List of processed results for each audio file. If W2lDecoder.nbest = 1, transcripts will be a list of just the best hypotheses dicts.
+             If W2lDecoder.nbest > 1, transcripts will be a list of lists, where for each audio file there will be N best hypotheses dicts.
+            A hypothesis dict has the following fields:
+                'pred_txt': (str) the transcript hypothesis itself.
+                'timestamps_word': (List[Dict]) List of word Dict objects, one for each word in the transcript, with the following fields:
+                    'word': the word itself.
+                    'start_time': the start time of the word in seconds in the corresponding audio file.
+                    'end_time': the end time of the word in seconds in the corresponding audio file.
+    """
+    transcripts = []
+    for i in range(emission_mx.size(dim=0)):
+        # if the batch_size is > 1, use the maximum original audio length in the batch, as all other audio files are padded to the max length during preprocessing.
+        audio_len = audio_lens[i] if emission_mx.size(dim=0) == 1 else max(audio_lens)
+        if num_hyps > 1:
+            all_results = []
+            for hyp in hypos[i]:
+                hyp_dict = dict()
+                if hyp['words']:
+                    # 'words' field is not empty if using a lexicon.
+                    transcript = ' '.join(hyp['words']).lower()
+                else:
+                    # 'words' field is [] if lexicon-free decoding, convert from non-blank symbols to words instead.
+                    tokens_str = ''.join(hyp['symbols'])
+                    transcript = ' '.join(tokens_str.split('|')).strip().lower()
+                hyp_dict['pred_txt'] = transcript
+                if time_aligns:
+                    word_times = get_word_time_alignments_fairseq(audio_len, emission_mx.size(dim=1), 16000, hyp['symbols'], hyp['timesteps'])
+                    timestamps_word = normalize_timestamp_output_w2v2(hyp_dict['pred_txt'].split(' '), word_times)
+                    hyp_dict['timestamps_word'] = timestamps_word
+                # add a hypothesis dict
+                all_results.append(hyp_dict)
+                
+            transcripts.append(all_results)
+        else:
+            hyp_dict = dict()
+            # append the decoded phrase (as a list of words) from the prediction of the first beam [0] (most likely transcript).
+            if hypos[i][0]['words']:
+                # 'words' field is not empty if using a lexicon.
+                transcript = ' '.join(hypos[i][0]['words']).lower()
+            else:
+                # 'words' field is [] if lexicon-free decoding, convert from non-blank symbols to words instead.
+                tokens_str = ''.join(hypos[i][0]['symbols'])
+                transcript = ' '.join(tokens_str.split('|')).strip().lower()
+            hyp_dict['pred_txt'] = transcript
+            if time_aligns:
+                word_times = get_word_time_alignments_fairseq(audio_len, emission_mx.size(dim=1), 16000, hypos[i][0]['symbols'], hypos[i][0]['timesteps'])
+                timestamps_word = normalize_timestamp_output_w2v2(hyp_dict['pred_txt'].split(' '), word_times)
+                hyp_dict['timestamps_word'] = timestamps_word
+            # add a hypothesis dict
+            transcripts.append(hyp_dict)
+
+    return transcripts
+
 
 # wav2vec2 ASR model abstract class
 class BaseWav2Vec2Model(ABC):
@@ -229,10 +362,9 @@ class TorchaudioWav2Vec2Model(BaseWav2Vec2Model):
         lengths = torch.tensor([waveform.shape[0] for waveform in waveforms]) # original lengths in samples of the audio files.
 
         padded_features = padded_features.to(device)
-        # TODO: check if word timestamps are correct during decoding when decoder receives original length, even though the length of the shorter audio sequence was extended by padding.
         lengths = lengths.to(device)
 
-        emissions, valid_frames = self.model(padded_features, lengths)
+        emissions, num_valid_frames = self.model(padded_features, lengths)
 
         return emissions, lengths.tolist()
 
@@ -400,9 +532,15 @@ class GreedyDecoder(BaseDecoder):
         # vocab is passed to the decoder object during initialisation
         vocab = self._get_vocab(vocab_path_or_bundle)
         self.decoder = decoding_utils_torch.GreedyCTCDecoder(vocab)
+        # print decoder info.
+        logging.info("------ Decoder ------")
+        logging.info("Greedy Decoder from torchaudio.")
+        logging.info(f"Type: {self.decoder}")
+        logging.info(f"Vocab: {self.decoder.labels}")
+        logging.info("Returns best hypotheses: 1")
+        logging.info("---------------------")
 
     def generate(self, emission_mx: torch.Tensor, audio_lens: Optional[List[int]] = None) -> List[Dict]:
-        # TODO: fully implemented.
         # generate one transcript
         # decoded phrase as a list of words
         # emission_mx has a batch dimension as 1st dim (batch = number of audio files).
@@ -423,66 +561,47 @@ class BeamSearchDecoder_Torch(BaseDecoder):
     def __init__(self, vocab_path_or_bundle: str, num_hyps: int = 1, time_aligns: bool = False) -> None:
         self.num_hyps = num_hyps
         self.time_aligns = time_aligns
-        # vocab is passed to the decoder object during initialisation
+        # vocab is passed to the decoder object during initialisation.
         vocab = self._get_vocab(vocab_path_or_bundle)
 
-        # initialise a beam search decoder with a KenLM language model
+        # the vocab is either taken from the torchaudio KenLM language model implementation or from a txt file
+        # True if using the decoder in combination with a wav2vec2 model from a checkpoint file (need to use the same vocab for decoder and ASR model)
+        vocab_from_txt = True if vocab_path_or_bundle.endswith('txt') else False
+        # <s> is taken from fairseq.data.dictionary.Dictionary.bos_word, else use default value of '-'
+        blank_token = '<s>' if vocab_from_txt else '-'
+
+        # beam search decoder params.
+        beam_size = 50 # default value in torchaudio.
+        beam_threshold = 50 # default value in torchaudio.
+
+        # initialise a beam search decoder.
         self.decoder = torchaudio.models.decoder.ctc_decoder(
             lexicon=None,
             lm=None,
-            tokens=vocab, # same as wav2vec2's vocab
-            nbest=self.num_hyps, # number of top beams (hypotheses) to return
+            tokens=vocab, # same tokens as ASR model's that were used during inference.
+            nbest=self.num_hyps, # number of top beams (hypotheses) to return.
+            beam_size=beam_size,
+            blank_token=blank_token,
+            beam_threshold=beam_threshold
         )
+        # print decoder info.
+        logging.info("------ Decoder ------")
+        logging.info("Lexicon-free beam search decoder without external language model, torchaudio implementation.")
+        logging.info(f"Type: {self.decoder}")
+        logging.info(f"Vocab: {vocab}")
+        logging.info(f"Beam size: {beam_size}")
+        logging.info(f"Returns best hypotheses: {self.decoder.nbest}")
+        logging.info("---------------------")
 
     def generate(self, emission_mx: torch.Tensor, audio_lens: Optional[List[int]] = None) -> Union[List[Dict], List[List[Dict]]]:
-        # TODO: fully implemented.
         # emission_mx has a batch dimension as 1st dim (batch = number of audio files).
-        transcripts = []
-        results = self.decoder(emission_mx.cpu().detach())
-        for i in range(emission_mx.size(dim=0)):
-            # if the batch_size is > 1, use the maximum original audio length in the batch, as all other audio files are padded to the max length during preprocessing.
-            audio_len = audio_lens[i] if emission_mx.size(dim=0) == 1 else max(audio_lens)
-            # append a list of all hypotheses for this element of the batch.
-            if self.num_hyps > 1:
-                all_results = []
-                for hyp in results[i]:
-                    hyp_dict = dict()
+        hypos = self.decoder(emission_mx.cpu().detach())
 
-                    tokens = hyp.tokens
-                    tokens_str = ''.join(self.decoder.idxs_to_tokens(tokens))
-                    transcript = ' '.join(tokens_str.split('|')).lower().rstrip().lstrip()
-                    hyp_dict['pred_txt'] = transcript
-
-                    if self.time_aligns:
-                        word_times = get_word_time_alignments_torch(audio_len, emission_mx.size(dim=1), 16000, self.decoder.idxs_to_tokens(tokens), hyp.timesteps)
-                        timestamps_word = normalize_timestamp_output(transcript.split(' '), word_times)
-                        hyp_dict['timestamps_word'] = timestamps_word
-                        
-                    # add a hypothesis dict
-                    all_results.append(hyp_dict)
-
-                transcripts.append(all_results)
-            else:
-                hyp_dict = dict()
-                # append the decoded phrase (as a list of words) from the prediction of the first beam [0] (most likely transcript).
-                tokens = results[i][0].tokens
-                tokens_str = ''.join(self.decoder.idxs_to_tokens(tokens))
-                transcript = ' '.join(tokens_str.split('|')).lower().rstrip().lstrip()
-                hyp_dict['pred_txt'] = transcript
-
-                if self.time_aligns:
-                    word_times = get_word_time_alignments_torch(audio_len, emission_mx.size(dim=1), 16000, self.decoder.idxs_to_tokens(tokens), results[i][0].timesteps)
-                    timestamps_word = normalize_timestamp_output(transcript.split(' '), word_times)
-                    hyp_dict['timestamps_word'] = timestamps_word
-
-                # add a hypothesis dict
-                transcripts.append(hyp_dict)
-
-        return transcripts
-
+        return beam_search_decode_torch(self.decoder, hypos, emission_mx, audio_lens, self.num_hyps, self.time_aligns)
+    
 
 class BeamSearchKenLMDecoder_Torch(BaseDecoder):
-    """Lexicon-based beam search decoder from torchaudio implementation with a KenLM LibriSpeech 4-gram language model (lexicon from the LM)."""
+    """Lexicon-based beam search decoder from torchaudio implementation with a KenLM LibriSpeech 4-gram language model (lexicon from the LM, vocab from ASR acoustic model)."""
     def __init__(self, vocab_path_or_bundle: str, num_hyps: int = 1, time_aligns: bool = False) -> None:
         self.num_hyps = num_hyps
         self.time_aligns = time_aligns
@@ -495,62 +614,48 @@ class BeamSearchKenLMDecoder_Torch(BaseDecoder):
         # the vocab is either taken from the torchaudio KenLM language model implementation or from a txt file
         # True if using the decoder in combination with a wav2vec2 model from a checkpoint file (need to use the same vocab for decoder and ASR model)
         vocab_from_txt = True if vocab_path_or_bundle.endswith('txt') else False
-        # <pad> is taken from fairseq.data.dictionary.Dictionary.target_dict.pad_word, else use default value of '-'
-        blank_token = '<pad>' if vocab_from_txt else '-'
+        # <s> is taken from fairseq.data.dictionary.Dictionary.bos_word, else use default value of '-'
+        blank_token = '<s>' if vocab_from_txt else '-'
 
-        # initialise a beam search decoder with a KenLM language model
+        # beam search decoder params.
+        beam_size = 1500 # default value in torchaudio.
+        lm_weight=3.23
+        word_score=-0.26
+        beam_threshold = 50
+
+        # initialise a beam search decoder with a KenLM language model.
         self.decoder = torchaudio.models.decoder.ctc_decoder(
-            lexicon=files.lexicon, # giant file of English "words"
-            tokens=vocab, # same as wav2vec2's vocab
+            lexicon=files.lexicon, # giant file of English "words".
+            tokens=vocab, # same tokens as ASR model's that were used during inference.
             blank_token=blank_token, 
-            lm=files.lm, # path to language model binary
+            lm=files.lm, # path to language model binary.
             nbest=self.num_hyps,
-            beam_size=1500,
-            lm_weight=3.23,
-            word_score=-0.26,
+            beam_size=beam_size,
+            beam_threshold=beam_threshold,
+            lm_weight=lm_weight,
+            word_score=word_score,
         )
 
+        # print decoder info.
+        logging.info("------ Decoder ------")
+        logging.info("Lexicon-based beam search decoder from torchaudio with KenLM 4-gram language model.")
+        logging.info(f"Type: {self.decoder}")
+        logging.info(f"Vocab: {vocab}")
+        logging.info(f"Returns best hypotheses: {self.decoder.nbest}")
+        logging.info(f"Beam size: {beam_size}")
+        logging.info(f"Beam threshold: {beam_threshold}")
+        logging.info(f"Lexicon filepath: {files.lexicon}")
+        logging.info(f"Language model filepath: {files.lm}")
+        logging.info(f"Language model weight: {lm_weight}")
+        logging.info(f"Lexicon word score: {word_score}")
+        logging.info("---------------------")
+
     def generate(self, emission_mx: torch.Tensor, audio_lens: Optional[List[int]] = None) -> Union[List[Dict], List[List[Dict]]]:
-        # TODO: fully implemented.
         # emission_mx has a batch dimension as 1st dim (batch = number of audio files).
-        transcripts = []
-        results = self.decoder(emission_mx.cpu().detach())
-        for i in range(emission_mx.size(dim=0)):
-            # if the batch_size is > 1, use the maximum original audio length in the batch, as all other audio files are padded to the max length during preprocessing.
-            audio_len = audio_lens[i] if emission_mx.size(dim=0) == 1 else max(audio_lens)
-            # append a list of all hypotheses for this element of the batch.
-            if self.num_hyps > 1:
-                all_results = []
-                for hyp in results[i]:
-                    hyp_dict = dict()
+        hypos = self.decoder(emission_mx.cpu().detach())
+        
+        return beam_search_decode_torch(self.decoder, hypos, emission_mx, audio_lens, self.num_hyps, self.time_aligns)
 
-                    transcript = ' '.join(hyp.words).lower()
-                    hyp_dict['pred_txt'] = transcript
-
-                    if self.time_aligns:
-                        word_times = get_word_time_alignments_torch(audio_len, emission_mx.size(dim=1), 16000, self.decoder.idxs_to_tokens(hyp.tokens), hyp.timesteps)
-                        timestamps_word = normalize_timestamp_output(transcript.split(' '), word_times)
-                        hyp_dict['timestamps_word'] = timestamps_word
-
-                    # add a hypothesis dict
-                    all_results.append(hyp_dict)
-                    
-                transcripts.append(all_results)
-            else:
-                hyp_dict = dict()
-                # append the decoded phrase (as a list of words) from the prediction of the first beam [0] (most likely transcript).
-                transcript = ' '.join(results[i][0].words).lower()
-                hyp_dict['pred_txt'] = transcript
-
-                if self.time_aligns:
-                    word_times = get_word_time_alignments_torch(audio_len, emission_mx.size(dim=1), 16000, self.decoder.idxs_to_tokens(results[i][0].tokens), results[i][0].timesteps)
-                    timestamps_word = normalize_timestamp_output(transcript.split(' '), word_times)
-                    hyp_dict['timestamps_word'] = timestamps_word
-
-                # add a hypothesis dict
-                transcripts.append(hyp_dict)
-
-        return transcripts
 
 
 class ViterbiDecoder(BaseDecoder):
@@ -563,6 +668,8 @@ class ViterbiDecoder(BaseDecoder):
     However, in the fairseq library 'Viterbi' is used as the name of their greedy decoder, 
     which simply finds the most likely token at each timestep without context, using only acoustic model predictions.
     The fairseq Viterbi decoder can only return the best hypothesis.
+
+    To be used with wav2vec2 acoustic models checkpoint files that were trained in the fairseq framework.
     """
     def __init__(self, vocab_path_or_bundle: str, num_hyps: bool = 1, time_aligns: bool = False) -> None:
         assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to ViterbiDecoder, must use a txt file as vocab path."
@@ -576,8 +683,15 @@ class ViterbiDecoder(BaseDecoder):
         # vocab is passed to the decoder object during initialisation
         self.decoder = W2lViterbiDecoder(decoder_args, target_dict)
 
+        # print decoder info.
+        logging.info("------ Decoder ------")
+        logging.info("Viterbi (greedy) Decoder, fairseq implementation.")
+        logging.info(f"Type: {self.decoder}")
+        logging.info(f"Vocab: {target_dict.symbols}")
+        logging.info("Returns best hypotheses: 1")
+        logging.info("---------------------")
+
     def generate(self, emission_mx: torch.Tensor, audio_lens: Optional[List[int]] = None) -> List[Dict]:
-        # TODO: fully implemented.
         # emission_mx has a batch dimension as 1st dim (batch = number of audio files).
         hypos = self.decoder.decode(emission_mx)
         transcripts = []
@@ -590,12 +704,72 @@ class ViterbiDecoder(BaseDecoder):
             hyp_dict['pred_txt'] = transcript
             if self.time_aligns:
                 word_times = get_word_time_alignments_fairseq(audio_len, emission_mx.size(dim=1), 16000, hypos[i][0]['symbols'], hypos[i][0]['timesteps'])
-                timestamps_word = normalize_timestamp_output(hyp_dict['pred_txt'].split(' '), word_times)
+                timestamps_word = normalize_timestamp_output_w2v2(hyp_dict['pred_txt'].split(' '), word_times)
                 hyp_dict['timestamps_word'] = timestamps_word
             # add a hypothesis dict
             transcripts.append(hyp_dict)
 
         return transcripts
+    
+
+class BeamSearchDecoder_Fairseq(BaseDecoder):
+    """Lexicon-free beam search decoder without a language model from fairseq implementation.
+    To be used with wav2vec2 acoustic models checkpoint files that were trained in the fairseq framework.
+    """
+    def __init__(self, vocab_path_or_bundle: str, num_hyps: int = 1, time_aligns: bool = False) -> None:
+        assert re.match(r'torchaudio.pipelines', vocab_path_or_bundle) is None, "Cannot provide a torch bundle to BeamSearchDecoder_Fairseq, must use a txt file as vocab path."
+
+        self.num_hyps = num_hyps
+        self.time_aligns = time_aligns
+
+        target_dict = Dictionary.load(vocab_path_or_bundle)
+
+        # beam search decoder params.
+        beam_size = 500
+        beam_threshold = 25.0
+        lexicon = ''
+        # zero LM workaround - must provide a valid path to a language model, but set the weights of the LM to zero.
+        lm_model = "/workspace/speech-augmentation/Models/language_models/lm_librispeech_kenlm_word_4g_200kvocab.bin"
+        lm_weight = 0.0
+        word_score = 0.0
+
+        # specify non-default decoder arguments as a dict that is then converted to a Namespace object
+        decoder_args = {
+            'kenlm_model': lm_model, # path to KenLM binary, found at https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
+            'unit_lm': True,
+            # used for both lexicon-based and lexicon-free beam search decoders
+            'nbest': self.num_hyps, # number of best hypotheses to keep, a property of parent class (W2lDecoder)
+            
+            # see ref: https://github.com/flashlight/flashlight/blob/main/flashlight/app/asr/README.md#2-beam-search-optimization
+            'beam': beam_size, # beam length (how many top tokens to keep at each timestep and therefore how many top hypotheses to generate after decoding all timesteps)
+            'beam_threshold': beam_threshold, # at each timestep, tokens whose score gaps from the highest scored token are larger than the threshold are discarded
+
+            'lm_weight': lm_weight, # how much the LM scores affect the hypotheses' scores
+            'sil_weight': 0.0, # the silence token's weight
+            # lexicon-based specific
+            'lexicon': lexicon, # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
+            'word_score': word_score,
+            'unk_weight': float('-inf'), # the unknown token's weight
+        }
+        decoder_args = Namespace(**decoder_args)
+        # vocab is passed to the decoder object during initialisation
+        self.decoder = W2lKenLMDecoder(decoder_args, target_dict)
+
+        # print decoder info.
+        logging.info("------ Decoder ------")
+        logging.info("Lexicon-free beam search decoder without a language model, fairseq implementation.")
+        logging.info(f"Type: {self.decoder}")
+        logging.info(f"Vocab: {target_dict.symbols}")
+        logging.info(f"Returns best hypotheses: {self.decoder.nbest}")
+        logging.info(f"Beam size: {beam_size}")
+        logging.info(f"Beam threshold: {beam_threshold}")
+        logging.info("---------------------")
+
+    def generate(self, emission_mx: torch.Tensor, audio_lens: Optional[List[int]] = None) -> Union[List[Dict], List[List[Dict]]]:
+        # emission_mx has a batch dimension as 1st dim (batch = number of audio files).
+        hypos = self.decoder.decode(emission_mx)
+        
+        return beam_search_decode_fairseq(hypos, emission_mx, audio_lens, self.num_hyps, self.time_aligns)
 
 
 class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
@@ -609,61 +783,55 @@ class BeamSearchKenLMDecoder_Fairseq(BaseDecoder):
         self.time_aligns = time_aligns
 
         target_dict = Dictionary.load(vocab_path_or_bundle)
+
+        # beam search decoder params.
+        beam_size = 500
+        beam_threshold = 25.0
+        lm_model = "/workspace/speech-augmentation/Models/language_models/lm_librispeech_kenlm_word_4g_200kvocab.bin"
+        lexicon = "/workspace/speech-augmentation/Models/language_models/lexicon_ltr.lst"
+        word_score = -1.0
+        lm_weight = 2.0
+
         # specify non-default decoder arguments as a dict that is then converted to a Namespace object
         decoder_args = {
-            'kenlm_model': "/workspace/speech-augmentation/Models/language_models/lm_librispeech_kenlm_word_4g_200kvocab.bin", # path to KenLM binary, found at https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
+            'kenlm_model': lm_model, # path to KenLM binary, found at https://github.com/flashlight/wav2letter/tree/main/recipes/sota/2019#pre-trained-language-models
             # used for both lexicon-based and lexicon-free beam search decoders
             'nbest': self.num_hyps, # number of best hypotheses to keep, a property of parent class (W2lDecoder)
             
             # see ref: https://github.com/flashlight/flashlight/blob/main/flashlight/app/asr/README.md#2-beam-search-optimization
-            'beam': 500, # beam length (how many top tokens to keep at each timestep and therefore how many top hypotheses to generate after decoding all timesteps)
-            'beam_threshold': 25.0, # at each timestep, tokens whose score gaps from the highest scored token are larger than the threshold are discarded
+            'beam': beam_size, # beam length (how many top tokens to keep at each timestep and therefore how many top hypotheses to generate after decoding all timesteps)
+            'beam_threshold': beam_threshold, # at each timestep, tokens whose score gaps from the highest scored token are larger than the threshold are discarded
 
-            'lm_weight': 2.0, # how much the LM scores affect the hypotheses' scores
+            'lm_weight': lm_weight, # how much the LM scores affect the hypotheses' scores
             'sil_weight': 0.0, # the silence token's weight
             # lexicon-based specific
-            'lexicon': "/workspace/speech-augmentation/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
-            'word_score': -1.0,
+            'lexicon': lexicon, # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
+            'word_score': word_score,
             'unk_weight': float('-inf'), # the unknown token's weight
         }
         decoder_args = Namespace(**decoder_args)
         # vocab is passed to the decoder object during initialisation
         self.decoder = W2lKenLMDecoder(decoder_args, target_dict)
 
+        # print decoder info.
+        logging.info("------ Decoder ------")
+        logging.info("Lexicon-based beam search decoder with a KenLM 4-gram language model from fairseq.")
+        logging.info(f"Type: {self.decoder}")
+        logging.info(f"Vocab: {target_dict.symbols}")
+        logging.info(f"Returns best hypotheses: {self.decoder.nbest}")
+        logging.info(f"Beam size: {beam_size}")
+        logging.info(f"Beam threshold: {beam_threshold}")
+        logging.info(f"Lexicon filepath: {lexicon}")
+        logging.info(f"Language model filepath: {lm_model}")
+        logging.info(f"Language model weight: {lm_weight}")
+        logging.info(f"Lexicon word score: {word_score}")
+        logging.info("---------------------")
+
     def generate(self, emission_mx: torch.Tensor, audio_lens: Optional[List[int]] = None) -> Union[List[Dict], List[List[Dict]]]:
-        # TODO: fully implemented.
         # emission_mx has a batch dimension as 1st dim (batch = number of audio files).
         hypos = self.decoder.decode(emission_mx)
-        transcripts = []
-        for i in range(emission_mx.size(dim=0)):
-            # if the batch_size is > 1, use the maximum original audio length in the batch, as all other audio files are padded to the max length during preprocessing.
-            audio_len = audio_lens[i] if emission_mx.size(dim=0) == 1 else max(audio_lens)
-            if self.num_hyps > 1:
-                all_results = []
-                for hyp in hypos[i]:
-                    hyp_dict = dict()
-                    hyp_dict['pred_txt'] = ' '.join(hyp['words']).lower()
-                    if self.time_aligns:
-                        word_times = get_word_time_alignments_fairseq(audio_len, emission_mx.size(dim=1), 16000, hyp['symbols'], hyp['timesteps'])
-                        timestamps_word = normalize_timestamp_output(hyp_dict['pred_txt'].split(' '), word_times)
-                        hyp_dict['timestamps_word'] = timestamps_word
-                     # add a hypothesis dict
-                    all_results.append(hyp_dict)
-                    
-                transcripts.append(all_results)
-            else:
-                hyp_dict = dict()
-                # append the decoded phrase (as a list of words) from the prediction of the first beam [0] (most likely transcript).
-                transcript = ' '.join(hypos[i][0]['words']).lower()
-                hyp_dict['pred_txt'] = transcript
-                if self.time_aligns:
-                    word_times = get_word_time_alignments_fairseq(audio_len, emission_mx.size(dim=1), 16000, hypos[i][0]['symbols'], hypos[i][0]['timesteps'])
-                    timestamps_word = normalize_timestamp_output(hyp_dict['pred_txt'].split(' '), word_times)
-                    hyp_dict['timestamps_word'] = timestamps_word
-                # add a hypothesis dict
-                transcripts.append(hyp_dict)
-
-        return transcripts
+        
+        return beam_search_decode_fairseq(hypos, emission_mx, audio_lens, self.num_hyps, self.time_aligns)
 
 
 class TransformerDecoder(BaseDecoder):
@@ -686,58 +854,53 @@ class TransformerDecoder(BaseDecoder):
         transformerLM_root_folder = "/workspace/speech-augmentation/Models/language_models/transformer_lm"
         convert_to_upper(os.path.join(transformerLM_root_folder, 'dict.txt'))
         # specify non-default decoder arguments as a dict that is then converted to a Namespace object
+
+        # beam search decoder params.
+        beam_size = 500
+        beam_threshold = 25.0
+        lm_model = os.path.join(transformerLM_root_folder, "lm_librispeech_word_transformer.pt")
+        lexicon = "/workspace/speech-augmentation/Models/language_models/lexicon_ltr.lst"
+        word_score = -1.0
+        lm_weight = 2.0
+
+
         decoder_args = {
-            'kenlm_model': os.path.join(transformerLM_root_folder, "lm_librispeech_word_transformer.pt"),
+            'kenlm_model': lm_model,
             # used for both lexicon-based and lexicon-free beam search decoders
             'nbest': self.num_hyps, # number of best hypotheses to keep, a property of parent class (W2lDecoder)
-            'beam': 500, # beam length
-            'beam_threshold': 25.0,
-            'lm_weight': 2.0,
+            'beam': beam_size, # beam length
+            'beam_threshold': beam_threshold,
+            'lm_weight': lm_weight,
             'sil_weight': 0.0, # the silence token's weight
             # lexicon-based specific
-            'lexicon': "/workspace/speech-augmentation/Models/language_models/lexicon_ltr.lst", # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
-            'word_score': -1.0,
+            'lexicon': lexicon, # https://dl.fbaipublicfiles.com/textless_nlp/gslm/eval_data/lexicon_ltr.lst
+            'word_score': word_score,
             'unk_weight': float('-inf'), # the unknown token's weight
         }
         decoder_args = Namespace(**decoder_args)
         # vocab is passed to the decoder object during initialisation
         self.decoder = W2lFairseqLMDecoder(decoder_args, target_dict)
 
+        # print decoder info.
+        logging.info("------ Decoder ------")
+        logging.info("Lexicon-based beam search decoder with a Transformer language model from fairseq.")
+        logging.info(f"Type: {self.decoder}")
+        logging.info(f"Vocab: {self.decoder.symbols}")
+        logging.info(f"Returns best hypotheses: {self.decoder.nbest}")
+        logging.info(f"Beam size: {beam_size}")
+        logging.info(f"Beam threshold: {beam_threshold}")
+        logging.info(f"Lexicon filepath: {lexicon}")
+        logging.info(f"Language model filepath: {lm_model}")
+        logging.info(f"Language model weight: {lm_weight}")
+        logging.info(f"Lexicon word score: {word_score}")
+        logging.info("---------------------")
+
     def generate(self, emission_mx: torch.Tensor, audio_lens: Optional[List[int]] = None) -> Union[List[Dict], List[List[Dict]]]:
-        # TODO: fully implemented.
         # emission_mx has a batch dimension as 1st dim (batch = number of audio files).
         hypos = self.decoder.decode(emission_mx)
 
-        transcripts = []
-        for i in range(emission_mx.size(dim=0)):
-            # if the batch_size is > 1, use the maximum original audio length in the batch, as all other audio files are padded to the max length during preprocessing.
-            audio_len = audio_lens[i] if emission_mx.size(dim=0) == 1 else max(audio_lens)
-            if self.num_hyps > 1:
-                all_results = []
-                for hyp in hypos[i]:
-                    hyp_dict = dict()
-                    hyp_dict['pred_txt'] = ' '.join(hyp['words']).lower()
-                    if self.time_aligns:
-                        word_times = get_word_time_alignments_fairseq(audio_len, emission_mx.size(dim=1), 16000, hyp['symbols'], hyp['timesteps'])
-                        timestamps_word = normalize_timestamp_output(hyp_dict['pred_txt'].split(' '), word_times)
-                        hyp_dict['timestamps_word'] = timestamps_word
-                    # add a hypothesis dict
-                    all_results.append(hyp_dict)
-                    
-                transcripts.append(all_results)
-            else:
-                hyp_dict = dict()
-                # append the decoded phrase (as a list of words) from the prediction of the first beam [0] (most likely transcript).
-                transcript = ' '.join(hypos[i][0]['words']).lower()
-                hyp_dict['pred_txt'] = transcript
-                if self.time_aligns:
-                    word_times = get_word_time_alignments_fairseq(audio_len, emission_mx.size(dim=1), 16000, hypos[i][0]['symbols'], hypos[i][0]['timesteps'])
-                    timestamps_word = normalize_timestamp_output(hyp_dict['pred_txt'].split(' '), word_times)
-                    hyp_dict['timestamps_word'] = timestamps_word
-                # add a hypothesis dict
-                transcripts.append(hyp_dict)
+        return beam_search_decode_fairseq(hypos, emission_mx, audio_lens, self.num_hyps, self.time_aligns)
 
-        return transcripts
 
 
 class ASR_Decoder_Pair():
@@ -814,110 +977,124 @@ class Wav2Vec2_Decoder_Factory():
         - this ensures that the decoder has the same vocab list as the ASR model for correct token decoding of the model output.
     """
 
-    # returns a torchaudio wav2vec2 model and a greedy decoder.
     @classmethod
     def get_torchaudio_greedy(cls, bundle_str: str='torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H', num_hyps: Optional[int]=None, time_aligns: Optional[bool]=None) -> ASR_Decoder_Pair:
+        """returns a torchaudio wav2vec2 model and a greedy decoder from torchaudio."""
         # using largest available wav2vec2 model from torchaudio by default
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(TorchaudioWav2Vec2Model(device=device, vocab_path_or_bundle=bundle_str),
                                 GreedyDecoder(vocab_path_or_bundle=bundle_str))
 
-    # returns a torchaudio wav2vec2 model and a lexicon-free beam search decoder without a language model.
     @classmethod
     def get_torchaudio_beamsearch(cls, bundle_str: str='torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H', num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a torchaudio wav2vec2 model and a lexicon-free beam search decoder from torchaudio without an external language model."""
         # using largest available wav2vec2 model from torchaudio
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(TorchaudioWav2Vec2Model(device=device, vocab_path_or_bundle=bundle_str),
                                 BeamSearchDecoder_Torch(vocab_path_or_bundle=bundle_str, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a torchaudio wav2vec2 model and a lexicon-based beam search decoder coupled with a KenLM language model also from torchaudio.
     @classmethod
     def get_torchaudio_beamsearchkenlm(cls, bundle_str: str='torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H', num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a torchaudio wav2vec2 model and a lexicon-based beam search decoder from torchaudio coupled with a KenLM external language model."""
         # using largest available wav2vec2 model from torchaudio
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(TorchaudioWav2Vec2Model(device=device, vocab_path_or_bundle=bundle_str),
                                 BeamSearchKenLMDecoder_Torch(vocab_path_or_bundle=bundle_str, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a Viterbi decoder from fairseq.
     @classmethod
-    def get_args_viterbi(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+    def get_args_viterbi(cls, model_filepath: str, vocab_path: str, num_hyps: Optional[int]=None, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a Viterbi decoder from fairseq."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 ViterbiDecoder(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a Viterbi decoder from fairseq.
     @classmethod
-    def get_cfg_viterbi(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+    def get_cfg_viterbi(cls, model_filepath: str, vocab_path: str, num_hyps: Optional[int]=None, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has a cfg field and a Viterbi decoder from fairseq."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 ViterbiDecoder(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a greedy decoder from torchaudio.
     @classmethod
     def get_args_greedy(cls, model_filepath: str, vocab_path: str, num_hyps: Optional[int]=None, time_aligns: Optional[bool]=None) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a greedy decoder from torchaudio."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 GreedyDecoder(vocab_path_or_bundle=vocab_path))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a greedy decoder from torchaudio.
     @classmethod
     def get_cfg_greedy(cls, model_filepath: str, vocab_path: str, num_hyps: Optional[int]=None, time_aligns: Optional[bool]=None) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has a cfg field and a greedy decoder from torchaudio."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 GreedyDecoder(vocab_path_or_bundle=vocab_path))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder from torchaudio without a language model.
     @classmethod
     def get_args_beamsearch_torch(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a beam search decoder from torchaudio without an external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 BeamSearchDecoder_Torch(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder from torchaudio without a language model.
     @classmethod
     def get_cfg_beamsearch_torch(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has a cfg field and a beam search decoder from torchaudio without an external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 BeamSearchDecoder_Torch(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a KenLM language model from torchaudio.
-    @classmethod
+    # 
     def get_args_beamsearchkenlm_torch(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a beam search decoder from torchaudio with a KenLM external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 BeamSearchKenLMDecoder_Torch(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a KenLM language model from torchaudio.
     @classmethod
     def get_cfg_beamsearchkenlm_torch(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has a cfg field and a beam search decoder from torchaudio with a KenLM external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 BeamSearchKenLMDecoder_Torch(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
+    
+    @classmethod
+    def get_args_beamsearch_fairseq(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a beam search decoder from fairseq without an external language model."""
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
+                                BeamSearchDecoder_Fairseq(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a KenLM language model from fairseq.
+    @classmethod
+    def get_cfg_beamsearch_fairseq(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has a cfg field and a beam search decoder from fairseq without an external language model."""
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
+                                BeamSearchDecoder_Fairseq(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
+
     @classmethod
     def get_args_beamsearchkenlm_fairseq(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a beam search decoder from fairseq with a KenLM external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 BeamSearchKenLMDecoder_Fairseq(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a KenLM language model from fairseq.
     @classmethod
     def get_cfg_beamsearchkenlm_fairseq(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has a cfg field and a beam search decoder from fairseq with a KenLM external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 BeamSearchKenLMDecoder_Fairseq(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has an args field and a beam search decoder with a Transformer language model from fairseq.
     @classmethod
     def get_args_beamsearchtransformerlm(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has an args field and a beam search decoder from fairseq with a Transformer external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(ArgsWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 TransformerDecoder(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))
 
-    # returns a wav2vec2 model loaded from a custom checkpoint that has a cfg field and a beam search decoder with a Transformer language model from fairseq.
     @classmethod
     def get_cfg_beamsearchtransformerlm(cls, model_filepath: str, vocab_path: str, num_hyps: int=1, time_aligns: bool=False) -> ASR_Decoder_Pair:
+        """returns a wav2vec2 model loaded from a custom checkpoint (trained in the fairseq framework) that has a cfg field and a beam search decoder from fairseq with a Transformer external language model."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return ASR_Decoder_Pair(CfgWav2Vec2Model(device=device, model_filepath=model_filepath, vocab_path_or_bundle=vocab_path),
                                 TransformerDecoder(vocab_path_or_bundle=vocab_path, num_hyps=num_hyps, time_aligns=time_aligns))

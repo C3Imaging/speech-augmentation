@@ -9,7 +9,7 @@ import torchaudio
 from tqdm import tqdm
 import torchaudio.models.decoder
 from Tools import utils
-from Tools import decoding_utils_torch
+from Tools.asr import decoding_utils_torch
 
 
 def infer_and_decode(speechfile, decoder):

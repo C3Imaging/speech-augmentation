@@ -14,12 +14,17 @@ import torchaudio
 import matplotlib
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from Tools.decoding_utils import Wav2Vec2_Decoder_Factory
-from Tools import utils, forced_alignment_utils, librispeech_utils, libritts_utils
+from Tools.asr.decoding_utils_w2v2 import Wav2Vec2_Decoder_Factory
+from Tools import utils, librispeech_utils, libritts_utils
+from Tools.asr import forced_alignment_utils
 
 
-def run_inference_batch(speech_files, transcripts):
-    """Runs wav2vec2 batched inference on all audio files read from a leaf folder.
+def run_inference(args, model, labels, dictionary, sr, speech_files, transcripts):
+    """Runs inference on all speech files and force aligns the corresponding transcripts.
+
+    The model, which was trained for ASR, first makes character predictions on an audio file, then the time alignment between the ground truth transcript characters and the audio is created.
+    The code processes the wav2vec2 predictions to get the start and stop times of each ground truth transcript character in an audio file then joins them into words.
+    The output will then be a JSON file with a line for each audio file, where the time alignments of each word are saved.
 
     The inference includes first generating the emission matrix by the wav2vec2 model, which contains the log probabilities of each label in the vocabulary for each time frame in the audio file.
      Then the trellis matrix is generated, which encodes the probabilities of each character from the transcript file over all time steps/frames in the audio file.
@@ -39,7 +44,7 @@ def run_inference_batch(speech_files, transcripts):
       speech_files [List[str]]:
         A sorted list of speech file paths.
       transcripts [List[str]]:
-        A list of transcript strings in wav2vec2 format corresponing to each speech file.
+        A list of transcript strings in wav2vec2 format, corresponing to each speech file.
     """
     with torch.inference_mode():
         # loop through audio files
@@ -102,7 +107,7 @@ def run_inference_batch(speech_files, transcripts):
                 item = dict()
                 item['wav_path'] = speech_filename
                 item['id'] = id
-                item['ground_truth_txt'] = ' '.join(transcript.split('|')).lstrip().rstrip().lower()
+                item['ground_truth_txt'] = ' '.join(transcript.split('|')).strip().lower()
                 vals = list()
                 for word in word_segments:
                     word_dict = dict()
@@ -140,27 +145,23 @@ def run_inference_batch(speech_files, transcripts):
             logging.info(f"finished forced aligning {speech_filename}")
 
 
-def run_inference():
-    """Runs wav2vec2 model on a folder specified as the positional argument of this script.
-
-    The model, which was trained for ASR, first makes character predictions on an audio file, then the time alignment between the ground truth transcript characters and the audio is created.
-    The code processes the wav2vec2 predictions to get the start and stop times of each ground truth transcript character in an audio file then joins them into words.
-    The output will then be a text file in CSV format for each audio file that saves the time alignments of each word.
-
-    The folder specified at the command line must be in Librispeech format, where it is either a 'leaf' folder that contains at least one .flac audio file and only one .txt transcript file,
+def get_audio_txt_pairs(args):
+    """If using a folder input, the folder specified at the command line must be in Librispeech format or LibriTTS format, where it is either a 'leaf' folder that contains at least one .flac or .wav audio file and only one .txt transcript file,
      or a 'root' folder containing a directory tree where there are many leaf subfolders.
-    The script can be run on either one leaf folder (specify the 'leaf' --mode at the command line) or on a root folder, where there are multiple leaf folders,
-     effectively running the script over the entire dataset (specified the 'root' --mode at the command line).
+     The script can be run on either one leaf folder (specify the 'leaf' --mode at the command line) or on a root folder, where there are multiple leaf folders,
+      effectively running the script over the entire dataset (specified the 'root' --mode at the command line).
+
+    If using a JSON file input, the --mode and folder input is ignored.
     """
+    all_speech_files, all_transcripts = [], []
     if args.input_from_json:
         # get list of speech files and corresponding transcripts from a hypotheses.json file.
-        speech_files, transcripts = librispeech_utils.get_speech_data_lists_from_json(args.input_from_json)
-        run_inference_batch(speech_files, transcripts)
+        all_speech_files, all_transcripts = librispeech_utils.get_speech_data_lists_from_json(args.input_from_json)
     else:
         # 'folder' arg used.
         # if mode=leaf run the script only on the audio files in a single folder specified
         # if mode=root, run the script on all subfolders, essentially over the entire dataset
-        for dirpath, _, filenames in os.walk(args.folder, topdown=asleaf): # if topdown=True, read contents of folder before subfolders, otherwise the reverse logic applies
+        for dirpath, _, filenames in os.walk(args.folder, topdown=args.asleaf): # if topdown=True, read contents of folder before subfolders, otherwise the reverse logic applies
             # process only folders that contain audio files or a hypothesis.txt file from custom wav2vec2 inference.      
             test = ' '.join(filenames)
             if ".wav" in test or ".flac" in test:
@@ -169,22 +170,27 @@ def run_inference():
                     speech_files, transcripts = libritts_utils.get_speech_data_lists(dirpath, filenames)
                 else:
                     speech_files, transcripts = librispeech_utils.get_speech_data_lists(dirpath, filenames)
-                # process only those folders that contain transcripts file(s) and speech file(s)
-                if transcripts is not None and speech_files:
-                    logging.info(f"starting to process folder {dirpath}")
-                    run_inference_batch(speech_files, transcripts)
-                    logging.info(f"finished processing folder {dirpath}")
-                if asleaf:
+
+                all_speech_files.append(speech_files)
+                all_transcripts.append(transcripts)
+
+                if args.asleaf:
                     break # to prevent reading subfolders
+        
+        # flatten list of lists into a list.
+        all_speech_files = [speechfile for minilist in all_speech_files for speechfile in minilist]
+        all_transcripts = [transcript for minilist in all_transcripts for transcript in minilist]
+
+    return all_speech_files, all_transcripts
 
 
-def main():
-    "Setup and use wav2vec2 model for time alignment between ground truth transcript and audio file from Librispeech dataset."
-    # setup inference model variables
-    global model, labels, dictionary, sr
+def main(args):
+    "Setup and use wav2vec2 model for time alignment between ground truth transcript and audio file from Librispeech or LibriTTS-formatted dataset or from JSON ASR inference output file."
 
+    # setup model.
+
+    # create model + decoder pair (change manually).
     if args.model_path:
-        # create model + decoder pair (change manually).
         asr = Wav2Vec2_Decoder_Factory.get_cfg_beamsearchtransformerlm(model_filepath=args.model_path, vocab_path=args.vocab_path)
         # use only the ASR acoustic model.
         model = asr.model
@@ -198,12 +204,18 @@ def main():
     else:
         # default to torchaudio wav2vec2 model if not using a custom .pt checkpoint.
         bundle = torchaudio.pipelines.WAV2VEC2_ASR_LARGE_LV60K_960H # wav2vec2 model trained for ASR, sample rate = 16kHz
+        # use only the ASR acoustic model.
         model = bundle.get_model().to(device) # wav2vec2 model on GPU
         labels = bundle.get_labels() # vocab of chars known to wav2vec2
         dictionary = {c: i for i, c in enumerate(labels)}
         sr = bundle.sample_rate
 
-    run_inference()
+    # get lists of audio filepaths and corresponding ground truth transcripts strings to align.
+    speech_files, transcripts = get_audio_txt_pairs(args)
+
+    # run ASR inference and forced alignment if there is parallel <audio,txt> data available to align.
+    if speech_files and transcripts:
+        run_inference(args, model, labels, dictionary, sr, speech_files, transcripts)
 
 
 if __name__ == "__main__":
@@ -228,7 +240,6 @@ if __name__ == "__main__":
 
     
     # parse command line arguments
-    global args
     args = parser.parse_args()
 
     # check arg vals.
@@ -240,8 +251,8 @@ if __name__ == "__main__":
 
     # setup directory traversal mode variables
     mode = args.mode
-    global asleaf
-    asleaf = True if mode == 'leaf' else False
+    d = vars(args)
+    d['asleaf'] = True if mode == 'leaf' else False
 
     #setup CUDA and Matplotlib configs
     torch.random.manual_seed(0)
@@ -252,6 +263,6 @@ if __name__ == "__main__":
     p = utils.Profiler()
     p.start()
 
-    main()
+    main(args)
 
     p.stop()
