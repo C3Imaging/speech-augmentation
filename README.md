@@ -9,9 +9,9 @@ Technologies such as Text-To-Speech (TTS) synthesis and Automatic Speech Recogni
 This repository provides the open-source scripts used for multi-speaker adult audio dataset augmentation, detailed in our paper [Title](link). Our first experimentations augment the [Librispeech](https://www.openslr.org/12/) train-clean-100 dataset, and we use the [CMU kids](https://catalog.ldc.upenn.edu/LDC97S63) dataset for computing child speaker embeddings.<br />
 
 The main functionalities for the augmentation pipeline can be broken down into the following scripts:<br />
-- [**audio-augmentation/Compute_librispeech_cmukids_similarities.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio-augmentation/Compute_librispeech_cmukids_similarities.py): computes the cosine similarity between adult speakers' embedding averaged over all utterances for that speaker to the average child speaker from the CMU kids multi-speaker audio dataset. The [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) library is used here.
+- [**audio_augmentation/Compute_librispeech_cmukids_similarities.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio_augmentation/Compute_librispeech_cmukids_similarities.py): computes the cosine similarity between adult speakers' embedding averaged over all utterances for that speaker to the average child speaker from the CMU kids multi-speaker audio dataset. The [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) library is used here.
 - [**asr/wav2vec2_forced_alignment_libri.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/asr/wav2vec2_forced_alignment_libri.py): runs forced alignment between Librispeech ground truth speaker transcripts and corresponding audio using wav2vec2.0 ASR model and the Viterbi + Trellis matrix backtracking traversal algorithm, to get the timestamps for each word in each transcript. **NOTE:** transcript files for the audio data are required. The [torchaudio](https://pytorch.org/audio/stable/index.html) library is used here.
-- [**audio-augmentation/cleese_audio_augmentation.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio-augmentation/cleese_audio_augmentation.py): augments the pitch and time duration characteristics of original adult audio data from a multi-speaker dataset (LibriSpeech in this case). The [CLEESE](https://github.com/neuro-team-femto/cleese) library is used here.
+- [**audio_augmentation/cleese_audio_augmentation.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio_augmentation/cleese_audio_augmentation.py): augments the pitch and time duration characteristics of original adult audio data from a multi-speaker dataset (LibriSpeech in this case). The [CLEESE](https://github.com/neuro-team-femto/cleese) library is used here.
 
 ## Installation Requirements (UNIX)
 
@@ -44,9 +44,9 @@ from .cleeseEngine import *
 
 ### Step 1: Select Suitable Adult Candidate Speakers
 
-Run the [**audio-augmentation/Compute_librispeech_cmukids_similarities.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio-augmentation/Compute_librispeech_cmukids_similarities.py) script on Librispeech train-clean-100 dataset + CMU kids dataset. The output results in a new folder being created that contains copied Librispeech speaker folders with a cosine similarity score above a specified threshold, appended with their gender tag.<br />
+Run the [**audio_augmentation/Compute_librispeech_cmukids_similarities.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio_augmentation/Compute_librispeech_cmukids_similarities.py) script on Librispeech train-clean-100 dataset + CMU kids dataset. The output results in a new folder being created that contains copied Librispeech speaker folders with a cosine similarity score above a specified threshold, appended with their gender tag.<br />
 Example call:<br />
-`python audio-augmentation/Compute_librispeech_cmukids_similarities.py --adults_dir /workspace/datasets/LibriSpeech-train-clean-100/LibriSpeech/train-clean-100 --kids_dir /workspace/datasets/cmu_kids --out_dir /workspace/datasets/LibriSpeech_preaugmentations_test --sim_thresh 0.65`<br /><br />
+`python audio_augmentation/Compute_librispeech_cmukids_similarities.py --adults_dir /workspace/datasets/LibriSpeech-train-clean-100/LibriSpeech/train-clean-100 --kids_dir /workspace/datasets/cmu_kids --out_dir /workspace/datasets/LibriSpeech_preaugmentations_test --sim_thresh 0.65`<br /><br />
 **NOTES:**
 - If using an adult dataset different from the original LibriSpeech or LibriTTS datasets, manually create a `SPEAKERS.txt` file and place it in the adult speakers dataset directory. An example of the file is the following (lines prepended with ';' are comments and are ignored):
 ```
@@ -81,26 +81,28 @@ Example call:<br />
 
 ### Step 3: Generate Augmented Dataset
 
-Using the new folder created after Step 1 and the time alignments JSON file from Step 2, run [**audio-augmentation/cleese_audio_augmentation.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio-augmentation/cleese_audio_augmentation.py) to produce a new, identically structured dataset of augmented speakers. The CLEESE configuration used for augmentation experiments can be found in the file [**audio-augmentation/cleeseConfig_all_lj.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio-augmentation/cleeseConfig_all_lj.py)
+Using the new folder created after Step 1 and the time alignments JSON file from Step 2, run [**audio_augmentation/cleese_audio_augmentation.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio_augmentation/cleese_audio_augmentation.py) to produce a new, identically structured dataset of augmented speakers. The CLEESE configuration used for augmentation experiments can be found in the file [**audio_augmentation/cleeseConfig_all_lj.py**](https://github.com/C3Imaging/speech-augmentation/blob/main/audio_augmentation/cleeseConfig_all_lj.py)
+Example call:<br />
+`python audio_augmentation/cleese_audio_augmentation.py --in_dir /workspace/datasets/LibriSpeech_preaugmentations_test --alignments_json /workspace/datasets/LibriSpeech_preaugmentations_test/w2v2_torchaudio_forced_align/forced_alignments.json --out_dir /workspace/datasets/LibriSpeech_augmentations_test --female_pitch 50 --male_pitch 0`
 
 # Other Important Scripts for your convenience
 
 ## ASR Inference
 Current ASR models available:
-- wav2vec2 ([fairseq](https://github.com/facebookresearch/fairseq) framework): You can run `wav2vec2_infer_custom.py` to generate hypothesis text transcripts from an unlabelled audio dataset.<br />
-Run `python wav2vec2_infer_custom.py --help` for a description of the usage.<br /><br />
-**NOTE:** You must manually specify the ASR pipeline you want to use in the code under the comment `# create model + decoder pair`. There are a number of possible combinations of ASR model + Decoder + [optional external Language Model] to choose from. Please see `decoding_utils/Wav2Vec2_Decoder_Factory` class for a list of the implemented pipelines.<br /><br />
+- wav2vec2 ([fairseq](https://github.com/facebookresearch/fairseq) framework): You can run [`asr/wav2vec2_infer_custom.py`](https://github.com/C3Imaging/speech-augmentation/blob/main/asr/wav2vec2_infer_custom.py) to generate hypothesis text transcripts from an unlabelled audio dataset.<br />
+Run `python asr/wav2vec2_infer_custom.py --help` for a description of the usage.<br /><br />
+**NOTE:** You must manually specify the ASR pipeline you want to use in the code under the comment `# create model + decoder pair`. There are a number of possible combinations of ASR model + Decoder + [optional external Language Model] to choose from. Please see [`Utils/asr/decoding_utils/Wav2Vec2_Decoder_Factory`](https://github.com/C3Imaging/speech-augmentation/blob/main/Utils/asr/decoding_utils_w2v2.py) class for a list of the implemented pipelines.<br /><br />
 **Wav2Vec2 ASR Pipeline Notes:**
   1. a wav2vec2 checkpoint file can have its architecture defined in the **"args"** field or **"cfg"** field, depending on the version of the fairseq framework used to train the model. If you get an error using a "get_args_" function from the Wav2Vec2 factory class, the checkpoint is likely a **"cfg"** one, thus try using the "get_cfg_" equivalent function instead and vice versa).
-  2. You must also manually edit the file `Tools/decoding_utils.py` with paths local to you in the following places:<br />
+  2. You must also manually edit the file [`Utils/asr/decoding_utils`](https://github.com/C3Imaging/speech-augmentation/blob/main/Utils/asr/decoding_utils_w2v2.py) with paths local to you in the following places, if using those particular decoders:<br />
   - `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> kenlm_model` (if using a KenLM external language model)
   - `BeamSearchKenLMDecoder_Fairseq -> __init__ -> decoder_args -> lexicon` (if using a KenLM external language model)
   - `TransformerDecoder -> __init__ -> transformerLM_root_folder` (if using a TransformerLM external language model)
   - `TransformerDecoder -> __init__ -> lexicon` (if using a TransformerLM external language model)<br /><br />
 
   **UPDATE:** word-level time alignment output information, as well as multiple hypotheses output is now supported. Please read [Time Aligned Predictions and Forced Alignment](https://github.com/C3Imaging/speech-augmentation?tab=readme-ov-file#time-aligned-predictions-and-forced-alignment) section for more details.<br />
-- Whisper ([whisper-timestamped](https://github.com/linto-ai/whisper-timestamped) framework): You can run `whisper_time_alignment.py` to generate hypothesis text transcripts from an unlabelled audio dataset with optional word-level time alignment output information as well as multiple hypotheses output.<br />
-Run `python whisper_time_alignment.py --help` for a description of the usage.<br />
+- Whisper ([whisper-timestamped](https://github.com/linto-ai/whisper-timestamped) framework): You can run [`asr/whisper_time_alignment.py`](https://github.com/C3Imaging/speech-augmentation/blob/main/asr/whisper_time_alignment.py) to generate hypothesis text transcripts from an unlabelled audio dataset with optional word-level time alignment output information as well as multiple hypotheses output.<br />
+Run `python asr/whisper_time_alignment.py --help` for a description of the usage.<br />
 Please read [Time Aligned Predictions and Forced Alignment](https://github.com/C3Imaging/speech-augmentation?tab=readme-ov-file#time-aligned-predictions-and-forced-alignment) section for more details.<br /><br />
 - Conformer ([NeMo](https://github.com/NVIDIA/NeMo) framework): Please see the [NeMo ASR Experiments](https://github.com/abarcovschi/nemo_asr/blob/main/README.md) project for more details.
 
@@ -109,26 +111,27 @@ Please read [Time Aligned Predictions and Forced Alignment](https://github.com/C
 Generating time alignment information for predictions is possible. Also, forced alignment between paired text and audio data (a.k.a aligning **known** text transcript with audio file) can be performed using ASR or TTS models.
 
 Current available ASR-based approaches:
-- **Wav2Vec2 inference with time alignment:** The script `wav2vec2_infer_custom.py` can be used to create word-level time aligned transcripts using wav2vec2 models **both** from the torchaudio library or from a custom trained/finetuned checkpoint using the [fairseq framework](https://github.com/facebookresearch/fairseq).<br /><br />
-Run `python wav2vec2_infer_custom.py --help` for a description of the usage.<br /><br />
-There are multiple ASR model + Decoder options available:
-  - Torchaudio Wav2Vec2 model + Greedy Decoder from torchaudio (multiple hypotheses and word-level timestamps unavailable);
-  - Torchaudio Wav2Vec2 model + lexicon-free Beam Search Decoder without external language model from torchaudio (multiple hypotheses and word-level timestamps available);
-  - Torchaudio Wav2Vec2 model + lexicon-based Beam Search Decoder with KenLM external language model from torchaudio (multiple hypotheses and word-level timestamps available);
-  - Wav2Vec2 model checkpoint trained using fairseq framework + Viterbi Decoder from fairseq (multiple hypotheses unavailable, word-level timestamps available);
-  - Wav2Vec2 model checkpoint trained using fairseq framework + Greedy Decoder from torchaudio (multiple hypotheses and word-level timestamps unavailable);
-  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-free Beam Search Decoder without external language model from torchaudio (multiple hypotheses and word-level timestamps available);
-  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with KenLM external language model from torchaudio (multiple hypotheses and word-level timestamps available);
-  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with KenLM external language model from fairseq (multiple hypotheses and word-level timestamps available);
-  - Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with neural Transformer-based external language model from fairseq (multiple hypotheses and word-level timestamps available).<br /><br />
+- **Wav2Vec2 inference with time alignment:** The script [`asr/wav2vec2_infer_custom.py`](https://github.com/C3Imaging/speech-augmentation/blob/main/asr/wav2vec2_infer_custom.py) can be used to create word-level time aligned transcripts using wav2vec2 models **both** from the torchaudio library or from a custom trained/finetuned checkpoint using the [fairseq framework](https://github.com/facebookresearch/fairseq).<br /><br />
+Run `python asr/wav2vec2_infer_custom.py --help` for a description of the usage.<br /><br />
+There are multiple ASR model + Decoder options available, as defined by class methods of `Wav2Vec2_Decoder_Factory`:
+  - `get_torchaudio_greedy`: Torchaudio Wav2Vec2 model + Greedy Decoder from torchaudio (multiple hypotheses and word-level timestamps unavailable);
+  - `get_torchaudio_beamsearch`: Torchaudio Wav2Vec2 model + lexicon-free Beam Search Decoder without external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - `get_torchaudio_beamsearchkenlm`: Torchaudio Wav2Vec2 model + lexicon-based Beam Search Decoder with KenLM external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - `get_args_viterbi` and `get_cfg_viterbi`: Wav2Vec2 model checkpoint trained using fairseq framework + Viterbi Decoder from fairseq (multiple hypotheses unavailable, word-level timestamps available);
+  - `get_args_greedy` and `get_cfg_greedy`: Wav2Vec2 model checkpoint trained using fairseq framework + Greedy Decoder from torchaudio (multiple hypotheses and word-level timestamps unavailable);
+  - `get_args_beamsearch_torch` and `get_cfg_beamsearch_torch`: Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-free Beam Search Decoder without external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - `get_args_beamsearchkenlm_torch` and `get_cfg_beamsearchkenlm_torch`: Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with KenLM external language model from torchaudio (multiple hypotheses and word-level timestamps available);
+  - `get_args_beamsearch_fairseq` and `get_cfg_beamsearch_fairseq`: Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-free Beam Search Decoder without external language model from fairseq (multiple hypotheses and word-level timestamps available);
+  - `get_args_beamsearchkenlm_fairseq` and `get_cfg_beamsearchkenlm_fairseq`: Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with KenLM external language model from fairseq (multiple hypotheses and word-level timestamps available);
+  - `get_args_beamsearchtransformerlm` and `get_cfg_beamsearchtransformerlm`: Wav2Vec2 model checkpoint trained using fairseq framework + lexicon-based Beam Search Decoder with neural Transformer-based external language model from fairseq (multiple hypotheses and word-level timestamps available).<br /><br />
  **NOTE:** By changing the source code of [fairseq/examples/speech_recognition/w2l_decoder.py](https://github.com/facebookresearch/fairseq/blob/main/examples/speech_recognition/w2l_decoder.py) to that in [fairseq forked](https://github.com/abarcovschi/fairseq-fork/blob/main/examples/speech_recognition/w2l_decoder.py), word-level timestamps can be returned from **all** the decoders in this file (W2lViterbiDecoder, W2lKenLMDecoder, W2lFairseqLMDecoder).<br /><br />
 - **Whisper inference with time alignment:** You can generate transcripts with Whisper and time align the generated transcript with the speech file using Dynamic Time Warping.<br />
-Run `python whisper_time_alignment.py --help` for a description of the usage).<br /><br />
+Run `asr/python whisper_time_alignment.py --help` for a description of the usage).<br /><br />
 **UPDATE:** By changing the source code of [openai/whisper/decoding.py](https://github.com/openai/whisper/blob/main/whisper/decoding.py), [openai/whisper/transcribe.py](https://github.com/openai/whisper/blob/main/whisper/transcribe.py) and [linto-ai/whisper-timestamped/transcribe.py](https://github.com/linto-ai/whisper-timestamped/blob/master/whisper_timestamped/transcribe.py) to those in the [openai/whisper forked](https://github.com/abarcovschi/whisper-fork) and [linto-ai/whisper-timestamped forked](https://github.com/abarcovschi/whisper-timestamped-fork) repositories, multiple hypotheses can be returned from beam search decoding, instead of the default best hypothesis offered by the original projects.<br /><br />
 - **Time alignment-enabled inference with NeMo models project:** You can generate transcripts with NeMo-based ASR models, such as Conformer-CTC, Conformer-Transducer, Hybrid FastFormer etc. and generate char and word-level time alignment information for the generated transcripts. This requires installing the NeMo framework. Please see the [**NeMo ASR Experiments**](https://github.com/abarcovschi/nemo_asr/blob/main/README.md#generating-time-alignments-for-transcriptions) project for more details.<br /><br />
 **UPDATE:** By using [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py), multiple hypotheses can also be returned from beam search decoding, instead of the default best hypothesis offered by the original project's [NeMo/examples/asr/transcribe_speech.py](https://github.com/NVIDIA/NeMo/blob/main/examples/asr/transcribe_speech.py).<br /><br />
-- **Wav2Vec2 forced alignment:** You can run `wav2vec2_forced_alignment_libri.py` to generate time alignments for paired <audio, ground truth text> datasets whose transcripts are saved in LibriSpeech **OR** LibriTTS format **OR** use the output transcripts/hypotheses (as ground truth) located in a JSON file outputted by an ASR inference scripts such as `wav2vec2_infer_custom.py`, `whisper_time_alignment.py` or [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py) and force align the audio to these hypotheses.<br />
-Run `python wav2vec2_forced_alignment_libri.py --help` for a description of the usage.<br />
+- **Wav2Vec2 forced alignment:** You can run `asr/wav2vec2_forced_alignment_libri.py` to generate time alignments for paired <audio, ground truth text> datasets whose transcripts are saved in LibriSpeech **OR** LibriTTS format **OR** use the output transcripts/hypotheses (as ground truth) located in a JSON file outputted by an ASR inference scripts such as `asr/wav2vec2_infer_custom.py`, `asr/whisper_time_alignment.py` or [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py) and force align the audio to these hypotheses.<br />
+Run `python asr/wav2vec2_forced_alignment_libri.py --help` for a description of the usage.<br />
 **NOTE:** models from torchaudio **AND** custom wav2vec2 models checkpoints trained/finetuned using the fairseq framework are now supported.
 
 ### Output Formats
