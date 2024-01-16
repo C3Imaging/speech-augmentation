@@ -173,7 +173,7 @@ Current Speaker Diarization models available:
 - Resemblyzer
 - NeMo MSDD<br /><br />
 All are accessed using `diarization/main.py` (run `python diarization/main.py --help` for a description of the usage).<br />
-The configuration for a diarization run can be modified in the `diarization/diarization.yaml` file.<br /><br />
+The configuration for a diarization run can be modified in the `diarization/diarization_config.yaml` file.<br /><br />
 **Resemblyzer Diairization Notes:**
   1. Resemblyzer allows the user to specify an example speech audio wav for each speaker from which a speaker embedding will be created, across all multipeaker audiofiles. To enable this functionality, you must create the following folder structure:<br /><br />
      In the main folder where the multispeaker audiofiles are located, create a `speaker-samples` subfolder. In it, create a subfolder for each audiofile with the same name as the audiofile. In each of these subfolders, have a `<SPEAKER_ID>.WAV` file for each speaker you wish to segment in the corresponding multispeaker audiofile from the main folder.<br /><br />
