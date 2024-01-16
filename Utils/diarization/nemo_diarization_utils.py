@@ -7,7 +7,6 @@ import json
 import logging
 from tqdm import tqdm
 from omegaconf import OmegaConf
-import pyannote_diarization_utils
 from nemo.collections.asr.models.msdd_models import NeuralDiarizer
 
 

@@ -8,13 +8,13 @@ import subprocess
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from config import Config
 from typing import Any, List
 from scipy.io import wavfile
 from omegaconf import OmegaConf
 from scipy.io.wavfile import write
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from Utils.yaml_config import Config
 
 
 # abstract class for all diarization implementations.

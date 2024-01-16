@@ -1,0 +1,47 @@
+## This file is validated against the schema: 'Utils/yaml_config.schema_multi_asr_config'
+
+# Specifies the root output folder path into which the results will be saved.
+output_folder: /workspace/datasets/LibriTTS_test_whisper/multi_asr_run2
+
+# In the output folder, will create len(speech_segments_funnels_thresholds) number of subfolders, each representing a dataset of paired <audio, text> data
+# Each subfolder represents speech segments of a particular confidence level, i.e. the higher the number, the more the decoders agree on the accuracy of the segment.
+# There must be at least two values specified.
+# The subfolders will be the following:
+#   In the case of two numbers specified:
+#     <output_folder>/data_funnel_gt_<lowest number>_lt_<highest number>
+#     <output_folder>/data_funnel_gt_<highest number>
+#   In the case of N numbers, where N > 2:
+#     <output_folder>/data_funnel_gt_<lowest number>_lt_<second lowest number>
+#     <output_folder>/data_funnel_gt_<second lowest number>_lt_<third lowest number>
+#     ...
+#     <output_folder>/data_funnel_gt_<second highest number>_lt_<highest number>
+#     <output_folder>/data_funnel_gt_<highest number>
+# where gt = greater than, lt = less than.
+speech_segments_funnels_thresholds:
+- 0.1
+- 0.3
+- 0.5
+
+# Specifies a list of decoder folders in which the hypotheses JSON files for each decoder are located.
+decoder_folders:
+- /workspace/datasets/LibriTTS_test_whisper/w2v2_infer_out_batch2_3hyps_timealigns_torchaudio_beamsearch
+- /workspace/datasets/LibriTTS_test_whisper/whisper_infer_out1_3hyps
+- /workspace/datasets/LibriTTS_test_whisper/conformer_transducer_allchildfinetuned_beamsearch_hyps3
+
+# Specifies a list of weights for hypothesis levels from best to worst, with the first value (for best hypothesis) usually being the maximum of 1.0
+hypothesis_level_weights:
+- 1.0
+- 0.8
+- 0.6
+
+# The type of algorithm used, can be one of: 'token_based_depthwise_algo', 'hypothesis_based_lengthwise_algo'
+algorithm_type: token_based_depthwise_algo
+
+# The threshold for a token match between the current 'driver' token and a candidate token from a 'other' hypothesis at the score level, after they have matched in time.
+compound_score_threshold: 0.5
+
+# The threshold ratio value to compare the IOU between two tokens, above which the two tokens are considered to be matching in time.
+iou_tokens_time_threshold: 0.25
+
+# Length of speech segments to save in seconds. Each saved speech segment will be roughly of this length.
+speech_segment_length: 1.3

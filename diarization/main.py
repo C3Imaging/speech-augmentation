@@ -6,8 +6,8 @@ sys.path.insert(0, current + '/..')
 import logging
 import argparse
 from Utils import utils
-from config import Config
-import diarization_utils
+import Utils.diarization.diarization_utils as diarization_utils
+from Utils.yaml_config import Config
 
 
 def create_speaker_segments(diarization_path, filter_sec=0.0, unified=False):
@@ -89,15 +89,20 @@ if __name__ == "__main__":
     cfg = Config(args.config_path)
 
     # setup logging to both console and logfile.
-    utils.setup_logging(cfg.get('audio_folder', os.getcwd()), 'diarization.log', console=True, filemode='a')
-    # log the command that started the script.
-    logging.info(f"Started script via: python {' '.join(sys.argv)}")
+    out_dir = cfg.get('audio_folder', os.getcwd())
 
-    # copy yaml config to audio folder.
+    utils.setup_logging(out_dir, 'diarization.log', console=True, filemode='w')
+
+    # copy yaml config information to log file.
     logging.info("Config information for this diarization run:")
     with open(args.config_path) as cfg_file:
         cfg_dict = yaml.full_load(cfg_file)
-        with open(os.path.join(cfg.get('audio_folder', os.getcwd()), 'diarization.log'), 'a') as logfile:
+        with open(os.path.join(out_dir, 'diarization.log'), 'a') as logfile:
             documents = yaml.dump(cfg_dict, logfile)
 
+    p = utils.Profiler()
+    p.start()
+
     main(cfg)
+
+    p.stop()

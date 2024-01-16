@@ -3,7 +3,7 @@ import sys
 current = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, current + '/..')
 import argparse
-import diarization_utils
+import Utils.diarization.diarization_utils as diarization_utils
 
 
 def run_args_checks(args):
