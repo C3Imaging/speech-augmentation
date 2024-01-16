@@ -185,3 +185,5 @@ The hypotheses transcripts located in the JSON files outputted by ASR inference 
 Sclite compares a `hypothesis.txt` file against a `reference.txt` and calculates the WER along with other statistics detailed [here](https://github.com/usnistgov/SCTK/blob/master/doc/outputs.htm) (download the file and open in browser to view).<br />
 - To create a `hypothesis.txt` file from an ASR inference output JSON file, run `Tools/asr/wer_sclite/asr_json_output_to_hypothesis_file.py`.<br />
 - To create a `reference.txt` file by traversing the directory tree of a parallel <audio, ground truth transcript> dataset, run `Tools/asr/wer_sclite/create_reference_file.py`.
+
+## Multi-ASR Parallel Audio-Text Data Creation Funnel Tool
