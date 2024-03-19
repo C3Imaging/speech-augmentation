@@ -8,11 +8,11 @@ This is not forced-alignment, but just timestamping the output of the Whisper ac
 
 import os
 import sys
+import math
 import torch
 import logging
 import argparse
 from tqdm import tqdm
-
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
@@ -20,7 +20,7 @@ sys.path.append(parent_dir)
 from Utils import utils
 from typing import List, Union, Dict
 import whisper_timestamped as whisper
-from Utils.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_all_wavs
+from Utils.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_wavlist_from_folder, get_wavlist_from_manifest
 
 
 def format_whisper_output(whisper_output: Union[List[List[Dict]], List[Dict]], time_aligns: bool, num_hyps: int) -> List[Hypotheses]:
@@ -76,7 +76,7 @@ def run_inference(model, beam_size, speech_files):
     Args:
       model [Whisper].
       beam_size [int]:
-        used for beam search decoding.
+        Used for beam search decoding.
       speech_files [List[str]]:
         A sorted list of speech file paths.
 
@@ -89,23 +89,32 @@ def run_inference(model, beam_size, speech_files):
                 'text': [str] the word itself.
                 'start': [float] the start time of the word in the audio file in seconds.
                 'end': [float] the end time of the word in the audio file in seconds.
+      error [bool]:
+        Flag used to specify whether an error has occurred during the transcription process.
     """
+    error = False
     with torch.inference_mode():
         # result object per audio file.
         transcripts = []
-        # loop through audio files
-        for speech_filename in tqdm(speech_files, total=len(speech_files), unit=" audio files", desc=f"processing audio files, so far"):
-            logging.info(f"processing audio file {speech_filename}")
+        try:
+            # loop through audio files.
+            for speech_filename in tqdm(speech_files, total=len(speech_files), unit=" audio files", desc=f"processing audio files, so far"):
+                logging.info(f"processing audio file {speech_filename}")
 
-            audio = whisper.load_audio(speech_filename)
-            # return all hypotheses from beam search ranked from most likely as index 0 to least likely as index -1.
-            results = whisper.transcribe(model, audio, beam_size=beam_size, best_of=5, temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0))
+                audio = whisper.load_audio(speech_filename)
+                # return all hypotheses from beam search ranked from most likely as index 0 to least likely as index -1.
+                results = whisper.transcribe(model, audio, beam_size=beam_size, best_of=5, temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0))
 
-            transcripts.append(results)
+                transcripts.append(results)
 
-            logging.info(f"finished processing audio file {speech_filename}")
+                logging.info(f"finished processing audio file {speech_filename}")
+        except Exception as err:
+            logging.error(f"ERROR!!! in transcribing file '{speech_filename}' with the following error: {err}")
+        finally:
+            logging.info("Save prematurely all the successful transcriptions created before the problematic speechfile {speech_filename}.")
+            error = True
 
-        return transcripts
+        return transcripts, error
 
 
 def main(args):
@@ -116,27 +125,51 @@ def main(args):
     model = whisper.load_model(args.model_path, device=device)
 
     # get all wav files as strings.
-    wav_paths = get_all_wavs(args.in_dir, args.path_filters)
+    wav_paths = get_wavlist_from_manifest(args.input, args.path_filters) if args.input.endswith(".json") else get_wavlist_from_folder(args.input, args.path_filters)
 
-    # run ASR inference and decode into predicted hypothesis transcripts.
-    results = run_inference(model, args.beam_size, wav_paths)
+    if args.batch_size == 1:
+        # sequential inference.
 
-    # format decoded ASR inference results to a common interface.
-    results = format_whisper_output(results, args.time_aligns, args.num_hyps)
+        # run ASR inference and decode into predicted hypothesis transcripts.
+        results, error = run_inference(model, args.beam_size, wav_paths)
 
-    # write results hypotheses to output json files.
-    write_results(results, wav_paths, args.out_dir)
+        # format decoded ASR inference results to a common interface.
+        results = format_whisper_output(results, args.time_aligns, args.num_hyps)
+
+        # write results hypotheses to output json files.
+        write_results(results, wav_paths, args.out_dir)
+    else:
+        # minibatch inference.
+        assert args.batch_size <= len(wav_paths), "ERROR: batch_size must be less than or equal to the number of audio files to process for inference."
+        for i in tqdm(range(0, len(wav_paths), args.batch_size), total=int(math.ceil(len(wav_paths)/args.batch_size)), unit=" minibatch", desc="Generating transcripts in minibatches, so far"):
+            logging.info(f"Generating transcripts for batch of {args.batch_size} audio files.")
+            # get the wavs in the current batch.
+            wavs = wav_paths[i:i+args.batch_size]
+            # run ASR inference and decode into predicted hypothesis transcripts.
+            results, error = run_inference(model, args.beam_size, wavs)
+
+            # format decoded ASR inference results to a common interface.
+            results = format_whisper_output(results, args.time_aligns, args.num_hyps)
+
+            # write results hypotheses to output json files for the current batch.
+            write_results(results, wavs, args.out_dir)
+            
+            if error:
+                logging.info("Error has occurred during batched trancription process. The processing loop has been stopped. See log above this point for more info.")
+                break
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run ASR inference (decoding) using Whisper ASR model and perform time alignment on folder(s) in the dataset.")
-    parser.add_argument("--in_dir", type=str, required=True,
-                        help="Path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files.")
+    parser.add_argument("input", type=str, nargs='?', default=os.getcwd(),
+                        help="EITHER path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files OR path to a JSON file containing a list of wavpaths to transcribe (manifest filepath).")
     parser.add_argument("--out_dir", type=str, required=True,
                         help="Path to a new output folder to create, where results will be saved.")
     parser.add_argument("--model_path", type=str, default='',
-                        help="Path of a huggingface cloud-hosted Whisper model.")
+                        help="Path of a HuggingFace cloud-hosted Whisper model.")
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="Minibatch size for inference. Defaults to 1 (sequential processing). NOTE: ASR inference is always done sequentially, while transcripts are saved in batches to save progress continually.")
     parser.add_argument("--beam_size", type=int, default=5,
                         help="Length of beam for beam search decoding. Defaults to 5 (consistent with Whisper paper).")
     parser.add_argument("--num_hyps", type=int, default=1,
@@ -144,7 +177,7 @@ if __name__ == "__main__":
     parser.add_argument("--time_aligns", default=False, action='store_true',
                         help="Flag used to specify whether to save word-level time alignment information along with the transcript for the hypothesis/hypotheses. Defaults to False if flag is not provided.")
     parser.add_argument("--path_filters", type=str, nargs='+', default='',
-                        help="List of keywords to filter the paths to audio files in the 'folder' directory. Will filter out any auidio files that have those keywords present anywhere in their absolute path.")
+                        help="List of keywords to filter the paths to audio files in the 'folder' directory. Will filter out any audio files that have those keywords present anywhere in their absolute path.")
 
     # parse command line arguments
     args = parser.parse_args()

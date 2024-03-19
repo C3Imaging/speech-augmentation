@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 
-def get_all_wavs(in_dir, path_filters):
+def get_wavlist_from_folder(in_dir, path_filters):
     """Get list of wav files across all subfolders and filter out any undesired wav files by name."""
 
     wav_paths = list(map(lambda x: str(x), list(Path(in_dir).glob("**/*.wav"))))
@@ -22,6 +22,24 @@ def get_all_wavs(in_dir, path_filters):
     wav_paths.sort()
 
     return wav_paths
+
+
+def get_wavlist_from_manifest(filepath, path_filters):
+    """
+    Get list of wav files from a manifest JSON file and filter out any undesired wav files by name.
+    Each line in the JSON file should be a dict containing a 'audio_filepath' field.
+    """
+    wavpaths = list()
+    with open(filepath, mode="r") as f:
+        for line in f:
+            item = json.loads(line)
+            wavpaths.append(item['audio_filepath'])
+    # filter out any undesired wav files.
+    if path_filters:
+        for fil in path_filters:
+            wavpaths = [w for w in wavpaths if fil not in w]
+    
+    return wavpaths
 
 
 def get_audio_id(audio_path):

@@ -1,7 +1,9 @@
 import os
 import sys
-import json
+import math
+import logging
 import argparse
+from tqdm import tqdm
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -10,7 +12,7 @@ sys.path.append(parent_dir)
 from Utils import utils
 from typing import List, Any, Union, Dict
 from Utils.asr.decoding_utils_w2v2 import Wav2Vec2_Decoder_Factory, ViterbiDecoder, GreedyDecoder, BaseDecoder
-from Utils.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_all_wavs
+from Utils.asr.common_utils import Hypotheses, Hypothesis, WordAlign, write_results, get_wavlist_from_folder, get_wavlist_from_manifest
 
 
 def format_w2v2_output(w2v2_output: Union[List[List[Dict]], List[Dict]], time_aligns: bool, num_hyps: int, decoder: BaseDecoder) -> List[Hypotheses]:
@@ -73,23 +75,46 @@ def main(args):
         # asr = Wav2Vec2_Decoder_Factory.get_torchaudio_greedy(num_hyps=args.num_hyps, time_aligns=args.time_aligns)
 
     # get all wav files as strings.
-    wav_paths = get_all_wavs(args.in_dir, args.path_filters)
+    wav_paths = get_wavlist_from_manifest(args.input, args.path_filters) if args.input.endswith(".json") else get_wavlist_from_folder(args.input, args.path_filters)
 
-    # run ASR inference and decode into predicted hypothesis transcripts.
-    results = asr.infer(wav_paths, batch_size=args.batch_size)
+    if args.batch_size == 1:
+        # sequential inference.
 
-    # format decoded ASR inference results to a common interface.
-    results = format_w2v2_output(results, args.time_aligns, args.num_hyps, asr.decoder)
+        # run ASR inference and decode into predicted hypothesis transcripts.
+        results, error = asr.infer(wav_paths, batch_size=args.batch_size)
 
-    # write results hypotheses to output json files.
-    write_results(results, wav_paths, args.out_dir)
+        # format decoded ASR inference results to a common interface.
+        results = format_w2v2_output(results, args.time_aligns, args.num_hyps, asr.decoder)
+
+        # write results hypotheses to output json files.
+        write_results(results, wav_paths, args.out_dir)
+    else:
+        # minibatch inference.
+        assert args.batch_size <= len(wav_paths), "ERROR: batch_size must be less than or equal to the number of audio files to process for inference."
+        for i in tqdm(range(0, len(wav_paths), args.batch_size), total=int(math.ceil(len(wav_paths)/args.batch_size)), unit=" minibatch", desc="Generating transcripts in minibatches, so far"):
+            logging.info(f"Main script: Generating transcripts for batch of {args.batch_size} audio files.")
+            # get the wavs in the current batch.
+            wavs = wav_paths[i:i+args.batch_size]
+            # run ASR inference and decode into predicted hypothesis transcripts.
+            results, error = asr.infer(wav_paths, batch_size=args.batch_size)
+
+            # format decoded ASR inference results to a common interface.
+            results = format_w2v2_output(results, args.time_aligns, args.num_hyps, asr.decoder)
+
+            # write results hypotheses to output json files for the current batch.
+            write_results(results, wavs, args.out_dir)
+            
+            if error:
+                logging.info("Main script: Error has occurred during batched trancription process. The processing loop has been stopped. See log above this point for more info.")
+                break
+            logging.info(f"Main script: Transcripts for entire batch generated successfully.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run ASR inference using a wav2vec2 checkpoint file and a dataset of audio files. Saves hypothesis transcripts to a new output folder. If ground truth transcript files exist, compile and save them in one file, so script output files are ready to be processed by sclite to calculate WER stats.")
-    parser.add_argument("--in_dir", type=str, required=True,
-                        help="Path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files.")
+    parser.add_argument("input", type=str, nargs='?', default=os.getcwd(),
+                        help="EITHER path to an existing folder containing wav audio files, optionally with corresponding txt transcript files for the corresponding audio files OR path to a JSON file containing a list of wavpaths to transcribe.")
     parser.add_argument("--out_dir", type=str, required=True,
                         help="Path to a new output folder to create, where results will be saved.")
     parser.add_argument("--model_path", type=str, default='',
@@ -97,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument("--vocab_path", type=str, default='',
                         help="Path of the finetuned wav2vec2 model's vocabulary text file (usually saved as dict.ltr.txt) that was used during wav2vec2 finetuning.")
     parser.add_argument("--batch_size", type=int, default=1,
-                        help="Minibatch size for inference. defaults to 1 (sequential processing). NOTE: decoding is always done sequentially, only ASR inference can be batched.")
+                        help="Minibatch size for inference. Defaults to 1 (sequential processing). NOTE: decoding is always done sequentially, only ASR acoustic model inference can be batched and transcripts are saved in batches to save progress continually.")
     parser.add_argument("--num_hyps", type=int, default=1,
                         help="The number of best hypotheses to be returned by beam search decoding (if using beam search decoder) for an audio file. Defaults to 1 (i.e. returns just the best hypothesis). NOTE: this does not change beam size of decoder!")
     parser.add_argument("--time_aligns", default=False, action='store_true',

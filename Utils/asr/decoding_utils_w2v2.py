@@ -919,16 +919,23 @@ class ASR_Decoder_Pair():
     def _infer_sequential(self, filepaths: List[str]) -> Union[Union[List[str], List[Tuple[str, Tuple[float, float]]]], List[List[Tuple[str, Tuple[float, float]]]]]:
         """Performs sequential inference on a list of audio filepath(s), processed one at a time, using a particular combination of ASR model and decoder."""
 
+        error = False
         transcripts = []
-        for filepath in tqdm(filepaths, total=len(filepaths), unit=" transcript", desc="Generating transcripts predictions sequentially, so far"):
-            logging.info(f"Generating transcript for {filepath}")
-            # emission_mx is a batch of emission matrices, one per audio file, but here batch dimension is always of size 1.
-            emission_mx, audio_len = self.model.forward([filepath], self.device)
-            transcript = self.decoder.generate(emission_mx, audio_len)[0] # batch_size = 1, so only [0] element present
-            transcripts.append(transcript)
-            logging.info(f"Transcript for {filepath} generated.")
+        try:
+            for filepath in tqdm(filepaths, total=len(filepaths), unit=" transcript", desc="Generating transcripts predictions sequentially, so far"):
+                logging.info(f"Generating transcript for {filepath}")
+                # emission_mx is a batch of emission matrices, one per audio file, but here batch dimension is always of size 1.
+                emission_mx, audio_len = self.model.forward([filepath], self.device)
+                transcript = self.decoder.generate(emission_mx, audio_len)[0] # batch_size = 1, so only [0] element present
+                transcripts.append(transcript)
+                logging.info(f"Transcript for {filepath} generated.")
+        except Exception as err:
+            logging.error(f"ERROR!!! In sequential processing during transcription of file '{filepath}' with the following error: {err}")
+        finally:
+            logging.info("Save prematurely all the successful transcriptions created before the problematic speechfile {filepath}.")
+            error = True
 
-        return transcripts
+        return transcripts, error
 
     def infer(self, filepaths: List[str], batch_size: int=1) -> Union[List[Dict], List[List[Dict]]]:
         """Performs minibatched inference on a list of audio sample(s) specified by the filepath(s), using a particular combination of ASR model and decoder.
@@ -948,24 +955,30 @@ class ASR_Decoder_Pair():
         # initialise the transcripts list for all files
         transcripts = []
 
-
         if batch_size == 1:
             # sequential inference
-            transcripts = self._infer_sequential(filepaths)
+            transcripts, error = self._infer_sequential(filepaths)
         else:
+            error = False
             # minibatch inference
             assert batch_size <= len(filepaths), "ERROR: batch_size must be less than or equal to the number of audio samples to process for inference."
-            for i in tqdm(range(0, len(filepaths), batch_size), total=int(math.ceil(len(filepaths)/batch_size)), unit=" minibatch", desc="Generating transcripts in minibatches, so far"):
-                logging.info(f"Generating transcripts for batch of wavs of size {batch_size}")
-                # emission_mx is a batch of emission matrices (one 2D matrix per audio file of size 'num_frames' * 'ASR output chars').
-                emission_mx, audio_lens = self.model.forward(filepaths[i:i+batch_size], self.device)
-                transcripts.append(self.decoder.generate(emission_mx, audio_lens))
-                logging.info(f"Transcripts for batch generated.")
+            try:
+                for i in tqdm(range(0, len(filepaths), batch_size), total=int(math.ceil(len(filepaths)/batch_size)), unit=" minibatch", desc="Generating transcripts in minibatches, so far"):
+                    logging.info(f"ASR_Decoder_Pair: Generating transcripts for a batch of wavs of size {batch_size}.")
+                    # emission_mx is a batch of emission matrices (one 2D matrix per audio file of size 'num_frames' * 'ASR output chars').
+                    emission_mx, audio_lens = self.model.forward(filepaths[i:i+batch_size], self.device)
+                    transcripts.append(self.decoder.generate(emission_mx, audio_lens))
+                    logging.info(f"ASR_Decoder_Pair: Transcripts for entire batch generated successfully.")
+            except Exception as err:
+                logging.error(f"ERROR!!! In batch processing during the transcription of some file in the batch with the following error: {err}")
+            finally:
+                logging.info("Save prematurely all the successfully transcribed batches created before the problematic batch.")
+                error = True
 
             # flatten the minibatch lists
             transcripts = [transcript for minilist in transcripts for transcript in minilist]
 
-        return transcripts
+        return transcripts, error
 
 
 class Wav2Vec2_Decoder_Factory():
