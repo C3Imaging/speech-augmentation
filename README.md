@@ -136,7 +136,7 @@ Run `python asr/wav2vec2_forced_alignment_libri.py --help` for a description of 
 
 ### Output Formats
 
-#### Inference
+#### <ins>Inference</ins>
 
 The format of JSON files containing word-level time-aligned transcripts, outputted by `wav2vec2_infer_custom.py` and `whisper_time_alignment.py`, is the following:<br /><br />
 ```json
@@ -146,18 +146,19 @@ The format of JSON files containing word-level time-aligned transcripts, outputt
 etc.
 <br /><br />
 **NOTE1:** The 'timestamps_word' field is optionally outputted by decoders that support word-level timestamps creation **if** the `--time_aligns` flag is set using `wav2vec2_infer_custom.py`; and if the `--time_aligns` flag is set using `whisper_time_alignment.py`.<br /><br />
-**NOTE2:** If `--num_hyps` is set to a value >1 when using `wav2vec2_infer_custom.py`; and if `--beam_size` is set to a value >1 **along** with `--num_hyps`<=`--beam_size` when using `whisper_time_alignment.py`, then **multiple** output files will be created, e.g. if `--num_hyps`=3:<br />
+**NOTE2:** 
+- If `--num_hyps` is set to a value >1 when using `wav2vec2_infer_custom.py`; and if `--beam_size` is set to a value >1 **along** with `--num_hyps`<=`--beam_size` when using `whisper_time_alignment.py`, then **multiple** output files will be created, e.g. if `--num_hyps`=3:<br />
 ```
 hypotheses1_of_3.json -> contains the best hypothesis per audio file in the input folder.
 hypotheses2_of_3.json -> contains the second best hypothesis per audio file in the input folder.
 hypotheses3_of_3.json -> contains the third best hypothesis per audio file in the input folder.
 ```
-files are created, with each file containing a JSON row (dict containing 'wav_path', 'id', 'pred_txt', ['timestamps_word'] fields) per audio file in the input folder.<br /><br />
-If `--num_hyps` is set to 1 when using `wav2vec2_infer_custom.py`, or if using a decoder that does not support returning multiple hypotheses; and if `--num_hyps` is set to 1 or if `--beam_size` is set to 1 when using `whisper_time_alignment.py`, then a **single** `best_hypotheses.json` file will be created, containing just the best hypothesis per audio file in the input folder.<br /><br />
+Each file contains a JSON row (dict containing 'wav_path', 'id', 'pred_txt', ['timestamps_word'] fields) per audio file in the input folder.<br /><br />
+- If `--num_hyps` is set to 1 when using `wav2vec2_infer_custom.py`, or if using a decoder that does not support returning multiple hypotheses; and if `--num_hyps` is set to 1 or if `--beam_size` is set to 1 when using `whisper_time_alignment.py`, then a **single** `best_hypotheses.json` file will be created, containing just the best hypothesis per audio file in the input folder.<br /><br />
 
-For the output format produced using NeMo models using the [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py) script, please see the [**NeMo ASR Experiments**](https://github.com/abarcovschi/nemo_asr/blob/main/README.md#generating-time-alignments-for-transcriptions) project (output is similar, but has character-level timestamps option also).
+**NOTE3:** For the output format produced using NeMo models using the [abarcovschi/nemo_asr/transcribe_speech_custom.py](https://github.com/abarcovschi/nemo_asr/blob/main/transcribe_speech_custom.py) script, please see the [**NeMo ASR Experiments**](https://github.com/abarcovschi/nemo_asr/blob/main/README.md#generating-time-alignments-for-transcriptions) project (output is similar, but has character-level timestamps option also).
 
-#### Forced Alignment
+#### <ins>Forced Alignment</ins>
 
 The format of JSON files containing word-level force-aligned transcripts, outputted by `wav2vec2_forced_alignment_libri.py` is the following:<br /><br />
 ```json
@@ -173,7 +174,7 @@ Current Speaker Diarization models available:
 - Resemblyzer
 - NeMo MSDD<br /><br />
 All are accessed using `diarization/main.py` (run `python diarization/main.py --help` for a description of the usage).<br />
-The configuration for a diarization run can be modified in the `diarization/diarization.yaml` file.<br /><br />
+The configuration for a diarization run can be modified in the `diarization/diarization_config.yaml` file.<br /><br />
 **Resemblyzer Diairization Notes:**
   1. Resemblyzer allows the user to specify an example speech audio wav for each speaker from which a speaker embedding will be created, across all multipeaker audiofiles. To enable this functionality, you must create the following folder structure:<br /><br />
      In the main folder where the multispeaker audiofiles are located, create a `speaker-samples` subfolder. In it, create a subfolder for each audiofile with the same name as the audiofile. In each of these subfolders, have a `<SPEAKER_ID>.WAV` file for each speaker you wish to segment in the corresponding multispeaker audiofile from the main folder.<br /><br />
@@ -185,3 +186,5 @@ The hypotheses transcripts located in the JSON files outputted by ASR inference 
 Sclite compares a `hypothesis.txt` file against a `reference.txt` and calculates the WER along with other statistics detailed [here](https://github.com/usnistgov/SCTK/blob/master/doc/outputs.htm) (download the file and open in browser to view).<br />
 - To create a `hypothesis.txt` file from an ASR inference output JSON file, run `Tools/asr/wer_sclite/asr_json_output_to_hypothesis_file.py`.<br />
 - To create a `reference.txt` file by traversing the directory tree of a parallel <audio, ground truth transcript> dataset, run `Tools/asr/wer_sclite/create_reference_file.py`.
+
+## Multi-ASR Parallel Audio-Text Data Creation Funnel Tool
