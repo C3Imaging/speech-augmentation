@@ -8,7 +8,31 @@ import random
 import librosa
 import argparse
 import collections
-from datetime import timedelta
+
+
+def is_two_vals(obj):
+    return True if len(obj) == 2 else False
+
+
+def is_a_percentage(val):
+    return True if 0 <= val <= 100 else False
+
+
+def is_a_percentage_range(obj):
+    return True if obj[0] < obj[1] and obj[0] >= 0 and obj[1] <= 100 else False
+
+
+def only_one_of_two_is_defined(obj1, obj2):
+    # return True only if one of two is not None. Return False if both are None or both are not None.
+    return True if (obj1 is None) != (obj2 is None) else False
+
+
+def run_args_checks():
+    if args.perc_range: 
+        assert is_two_vals(args.perc_range) is True and is_a_percentage_range(args.perc_range) is True, "ERROR: --perc_range must get two percentage values, where the first value is less than the second."
+    if args.sampling_perc:
+        assert is_a_percentage(args.sampling_perc), "ERROR: --sampling_perc must be a percentage."
+    assert only_one_of_two_is_defined(args.perc_range, args.sampling_perc)
 
 
 def create_manifest():
@@ -44,8 +68,16 @@ def create_manifest():
         # filter out audio files that are shorter than the minimum duration allowable by the 'min_time' filter.
         non_transcribed_wavs = list(filter(lambda x: librosa.core.get_duration(filename=x) > args.min_time, non_transcribed_wavs))
         
-        if args.sampling_perc < 100:
-            # use only a subset of the total filtered untranscribed files, specified as a percentage, to create the manifest file.
+        if args.perc_range:
+            # use a slice from the contiguous ordered data list to create the manifest file.
+            non_transcribed_wavs.sort()
+            l = len(non_transcribed_wavs)
+            idx_start = math.floor(l * args.perc_range[0] / 100)
+            idx_end = math.floor(l * args.perc_range[1] / 100)
+            non_transcribed_wavs = non_transcribed_wavs[idx_start:idx_end]
+            
+        if args.sampling_perc:
+            # use only a random subset of the total filtered untranscribed files, specified as a percentage, to create the manifest file.
             n = math.floor(len(non_transcribed_wavs) * args.sampling_perc / 100)
             non_transcribed_wavs = random.sample(non_transcribed_wavs, n)
 
@@ -97,11 +129,14 @@ if __name__ == "__main__":
                         help="Full path to a new JSON file to create, that will list the wavpaths of audio files that do not have a corresponding transcript.")
     parser.add_argument("--min_time", type=float, default=0.0,
                         help="Filter to exclude audio files whose duration is less than the specified value.")
-    parser.add_argument("--sampling_perc", type=int, default=100,
-                        help="Conduct random sampling without replacement to select the specified percentage of the time filtered data as a subset from which to create the manifest file from, if needed. Defaults to entire population, i.e. 100 percent of data used.")
+    parser.add_argument("--perc_range", type=int, nargs='+', required=False,
+                        help="Include only a slice of the total data in the manifest file, specified as two int values, the starting percentage and ending percentage of the data. The data is viewed as an ordered contiguous list, i.e. no random sampling. E.g.1: 0 50 means select a slice of the total data from the start to 50 percent, inclusively. E.g.2: 0 100 means use all the data (no need to explicitly use this combination, can just omit this argument). E.g.3: 14 67 means use data from 14 percent to 67 percent, both inclusively.")
+    parser.add_argument("--sampling_perc", type=int, required=False,
+                        help="Conduct random sampling without replacement to select the specified percentage of the time filtered data as a subset from which to create the manifest file from, if needed. E.g. 100 means 100 percent of data is sampled (no need to explicitly specify this, can just omit this argument).")
     
     # parse command line arguments.
     args = parser.parse_args()
+    run_args_checks()
     
     create_manifest()
     
